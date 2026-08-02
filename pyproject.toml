@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crashgap"
+version = "0.1.0"
+description = "Live, versioned female-vs-male road-crash fatality gap on public-domain NHTSA FARS data"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "requests>=2.31",
+    "pandas>=2.0",
+    "streamlit>=1.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.4"]
+
+[project.scripts]
+crashgap = "crashgap.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["crashgap*"]
+
+[tool.ruff.lint]
+select = ["E9", "F"]

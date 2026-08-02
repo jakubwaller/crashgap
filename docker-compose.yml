@@ -1,0 +1,15 @@
+services:
+  crashgap:
+    build: .
+    container_name: crashgap
+    restart: unless-stopped
+    ports:
+      - "8503:8501"
+    volumes:
+      - ./data:/app/data
+    networks:
+      - web_proxy
+
+networks:
+  web_proxy:
+    external: true

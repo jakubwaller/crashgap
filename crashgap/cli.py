@@ -57,12 +57,26 @@ def main(argv: list[str] | None = None) -> int:
         years = parse_years(args.years)
         span = (years[0], years[-1])
         conn = connect(args.db)
-        for dp in analyze(conn, span, reps=args.reps):
-            ci = f"[{dp.ci_lo}, {dp.ci_hi}]" if dp.ci_lo is not None else "[-]"
-            print(f"frontal={dp.frontal:6s} RR={dp.rr} {ci} "
-                  f"f_only={dp.f_only} m_only={dp.m_only} "
-                  f"pairs={dp.n_pairs:,} crashes={dp.n_crashes:,}")
-        print("\nmodel-year bands (frontal=core):")
+
+        def pct(x: float | None) -> str:
+            return f"{(x - 1) * 100:+.1f}%" if x else "n/a"
+
+        for dp, dec in analyze(conn, span, reps=args.reps):
+            print(f"\n--- frontal={dp.frontal} "
+                  f"({dp.n_pairs:,} pairs, {dp.n_crashes:,} crashes) ---")
+            print(f"  pooled (SEAT-CONFOUNDED, do not report alone): RR={dp.rr} "
+                  f"[{dp.ci_lo}, {dp.ci_hi}]")
+            print(f"    she is passenger: RR={dec.rr_she_passenger} "
+                  f"({dec.n_pairs_she_passenger:,} pairs)")
+            print(f"    she drives:       RR={dec.rr_she_drives} "
+                  f"({dec.n_pairs_she_drives:,} pairs)")
+            sig = "significant" if dec.sex_is_significant else "NOT significant"
+            print(f"  sex effect  (seat-balanced): {dec.sex_effect} = {pct(dec.sex_effect)} "
+                  f"{dec.sex_ci} -> {sig}")
+            sig = "significant" if dec.seat_is_significant else "NOT significant"
+            print(f"  seat effect (right front):   {dec.seat_effect} = {pct(dec.seat_effect)} "
+                  f"{dec.seat_ci} -> {sig}")
+        print("\nmodel-year bands (frontal=core, pooled ratio, no trend claim):")
         print(by_model_year_band(conn, span).to_string(index=False))
     elif args.command == "dashboard":
         app = Path(__file__).resolve().parent.parent / "dashboard" / "app.py"

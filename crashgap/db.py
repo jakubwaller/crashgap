@@ -55,9 +55,12 @@ CREATE TABLE IF NOT EXISTS results (
 --   frontal_wide IMPACT1 in ({cb.sql_in(cb.IMPACT1_FRONTAL_WIDE)})  sensitivity variant
 --   light vehicle = passenger car + light truck/van (NHTSA grouping)
 --   age {cb.AGE_MIN}-{cb.AGE_MAX} per Atwood/Noh/Craig 2023; FARS sentinels 998/999 excluded by the window
-CREATE VIEW IF NOT EXISTS v_occupant AS
+-- The view is dropped and recreated on every connect so definition changes
+-- reach existing databases without a migration.
+DROP VIEW IF EXISTS v_occupant;
+CREATE VIEW v_occupant AS
 SELECT p.source, p.year, p.st_case, p.veh_no, p.per_no,
-       p.sex, p.age, v.mod_year, v.impact1, a.man_coll,
+       p.sex, p.age, p.seat_pos, v.mod_year, v.impact1, a.man_coll,
        CASE WHEN p.sex={cb.SEX_FEMALE} THEN 1 WHEN p.sex={cb.SEX_MALE} THEN 0 END AS is_female,
        CASE WHEN p.per_typ IN ({cb.sql_in(cb.PER_TYP_OCCUPANTS)}) THEN 1 ELSE 0 END AS is_occupant,
        CASE WHEN p.seat_pos IN ({cb.sql_in(cb.SEAT_POS_FRONT_OUTBOARD)}) THEN 1 ELSE 0 END AS is_front_outboard,

@@ -19,8 +19,14 @@ SEX_FEMALE = 2
 PER_TYP_OCCUPANTS = {1, 2}
 
 # SEAT_POS: 11 = front left (driver), 13 = front right. Front outboard only,
-# so both pair members face comparable restraint/airbag environments.
-SEAT_POS_FRONT_OUTBOARD = {11, 13}
+# so both pair members face comparable restraint/airbag environments. Seat is
+# the one thing that structurally differs WITHIN every pair and it is heavily
+# collinear with sex (she is the passenger in ~73% of mixed pairs), so the
+# analysis decomposes it out via Evans' geometric mean over the two seat
+# configurations rather than pooling over it.
+SEAT_POS_DRIVER = 11
+SEAT_POS_RIGHT_FRONT = 13
+SEAT_POS_FRONT_OUTBOARD = {SEAT_POS_DRIVER, SEAT_POS_RIGHT_FRONT}
 
 # REST_USE belted = {1, 2, 3}: shoulder only, lap only, lap + shoulder.
 # The full belted set - not 3 alone, which silently drops lap-only and

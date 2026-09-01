@@ -4,7 +4,10 @@ Every inclusion rule the analysis uses is a literal here, so the cohort
 definition can be serialized into results.cohort_def and audited against the
 FARS Analytical User's Manual. Definitions that copy a published study cite it.
 
-Codings verified against the real 2015/2019/2022/2024 National CSV files.
+Codings verified against the real 2015/2019/2022/2024 National CSV files,
+and re-verified across the 2000-2014 ingestion (drift check 2026-09-01 over
+the 2000/2004/2008/2009/2010/2014/2015 files). Where a FARS recode happened
+inside 2000-2024, the note sits next to the affected code set below.
 """
 
 from __future__ import annotations
@@ -30,7 +33,10 @@ SEAT_POS_FRONT_OUTBOARD = {SEAT_POS_DRIVER, SEAT_POS_RIGHT_FRONT}
 
 # REST_USE belted = {1, 2, 3}: shoulder only, lap only, lap + shoulder.
 # The full belted set - not 3 alone, which silently drops lap-only and
-# shoulder-only occupants.
+# shoulder-only occupants. Cross-era stable: the 2010 REST_USE recode moved
+# "none used" from 0 to 7 and reshuffled the helmet codes, but 1/2/3 keep
+# their meaning throughout 2000-2024; "restraint used, type unknown" (8) is
+# excluded in both eras.
 REST_USE_BELTED = {1, 2, 3}
 
 # INJ_SEV (KABCO): 4 = fatal. 0-3 = survived spectrum; 5/6/9 (injured
@@ -39,7 +45,10 @@ INJ_SEV_FATAL = 4
 INJ_SEV_NONFATAL = {0, 1, 2, 3}
 
 # Age window per Atwood, Noh & Craig 2023 (FARS 1975-2019 double-pair study).
-# FARS sentinels 998/999 fall outside the window and drop out with it.
+# The unknown-age sentinel changed schemes in 2009 (99 through 2008, 998/999
+# from 2009 on); both fall outside 16-96 and drop out with the window, which
+# is presumably why the published study pinned 96 - do not widen the top end
+# without handling the pre-2009 99 sentinel explicitly.
 AGE_MIN = 16
 AGE_MAX = 96
 
@@ -47,6 +56,15 @@ AGE_MAX = 96
 # core zone used by Forman et al. 2019; the wider fan and the strict
 # MAN_COLL=2 head-on cut are documented sensitivity variants, never silently
 # substituted.
+#
+# Cross-era caveat for the WIDE variant only: 2010+ files add side-specific
+# codes (61-63 left, 81-83 right) that drain crashes out of clock points
+# 2/3/9/10, so the wide fan's 10 and 2 select a somewhat narrower set of
+# crashes after 2010 than before. The core zone {11, 12, 1} shows no such
+# break (volumes continuous across 2009->2010), and MAN_COLL=2 keeps its
+# meaning through the 2010 recode ("Head-On" -> "Front-to-Front", same code,
+# continuous volumes) - only cross-era comparisons of the wide variant carry
+# this asterisk.
 IMPACT1_FRONTAL_CORE = {11, 12, 1}
 IMPACT1_FRONTAL_WIDE = {10, 11, 12, 1, 2}
 MAN_COLL_HEAD_ON = 2

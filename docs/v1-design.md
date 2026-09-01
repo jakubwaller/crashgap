@@ -450,3 +450,70 @@ and reflected above where table cells were wrong.
   the per-band female pattern flips direction between the pooled and separate-nuisance fits. The
   claim shipped is "trend direction unidentified on this window", not "consistent with shrinking"
   and not "still rising".
+
+## 13. The 2000-2014 ingestion follow-up (executed 2026-09-01)
+
+Section 11 scoped "ingest the intervening 2000-2014 years" as the follow-up that could move the
+trend question. Executed; this section records what was verified, what was added, and where the
+claims moved. All numbers below are frontal core and live in `results` under the 2000-2024 runs.
+
+**Code-drift verification before widening the span** (distributions inspected on the real
+2000/2004/2008/2009/2010/2014/2015 National CSV files; notes now pinned in `codebook.py`):
+
+- `SEAT_POS` 11/13, `PER_TYP` 1/2, `INJ_SEV` 4 vs 0-3, `SEX` 1/2, `BODY_TYP` light-vehicle set:
+  stable across the whole 2000-2024 span (the 30-33 pickup codes the set already carried ARE the
+  2000-2019 coding).
+- `AGE`: unknown = 99 through 2008, 998/999 from 2009. Both schemes fall outside the 16-96
+  window; the top end must not be widened without handling the pre-2009 99 explicitly.
+- `REST_USE`: the 2010 recode moved "none used" 0 -> 7 and reshuffled helmet codes; belted
+  {1, 2, 3} keeps its meaning throughout, and "used, type unknown" (8) is excluded in both eras.
+- `MAN_COLL` 2 ("Head-On" -> "Front-to-Front" in the 2010 recode): same code, continuous volumes
+  across the 2009->2010 boundary (3,038 -> 2,851).
+- `IMPACT1`: 2010+ adds side-specific codes 61-63/81-83 that drain clock points 2/3/9/10. The
+  core zone {11, 12, 1} is continuous across the boundary; the WIDE variant's 10 and 2 select a
+  narrower crash set after 2010, so cross-era comparisons of the wide variant carry an asterisk
+  (documented in the codebook and on the dashboard).
+- `MOD_YEAR` is 4-digit with 9999 sentinels in all these years; the 1970-2026 window already
+  handles it.
+
+**Two additions to the estimand contract** (both per frontal variant, both in the
+`test_analyze_v1_writes_the_full_estimand_contract` contract):
+
+- `fars_condlogit_sex_effect_frontal_{v}_band_{label}_vehage12` — the default band model refit on
+  vehicles at most `VEHICLE_AGE_MAX` = 12 years old at crash. Rationale: with 25 calendar years
+  pooled, an old band is observed at high vehicle ages in ways the newest band cannot be, and
+  vehicle age is constant within a pair, so the within-vehicle design cannot difference it away;
+  the cap puts bands on comparable vehicle-age support at the price of making band and calendar
+  period nearly synonymous (model year = period - vehicle age; the three are linearly dependent
+  and the design separates none of them).
+- `fars_samesex_seatsex_interaction_ageadj_agecomparable_frontal_{v}` — the age-adjusted
+  interaction refit on pairs with within-pair age gap <= `AGE_COMPARABLE_GAP` = 10 years, where
+  the quadratic adjustment interpolates rather than extrapolates. This is the fragility check
+  from section 12's review finding, promoted from a one-off diagnostic to a ledger row.
+
+**Where the claims moved** (v1's "trend unidentified" and "interaction not robust" both
+superseded — the dashboard and README carry the new framing):
+
+- The 1970-1999 band went from 553 to 5,532 discordant pairs. The pre-2000 -> 2000s drop (1.26
+  [1.19-1.33] -> 1.09 [1.03-1.15] default; 1.28 -> 1.11 separate-nuisance; 1.23 -> 1.05
+  vehage12) has disjoint CIs under every specification: the direction of the published decline
+  is reproduced in-window for the first time.
+- No post-2000 pairwise band contrast has disjoint CIs under any specification, the 2010+ bands
+  sit at or above the 2000s level in every specification, and the newest band still flips with
+  the nuisance choice (1.26 pooled vs 1.10 separate; the per-band seat effect stays the reason
+  pooling is rejected: ~1.0 in older bands vs 1.34 [1.17-1.53] in 2017+). Continuous slope
+  -0.025/decade [-0.062, +0.013]. The published continued shrink to ~5.8% is NOT reproduced;
+  candidate explanations (2020-2024 period effects beyond the published study's 2019 endpoint vs
+  a genuine plateau) are stated as unresolvable in this design.
+- The age-adjusted seat x sex interaction on the full window is +0.209 [0.121, 0.297] with
+  n=7,140/4,744 discordant pairs, era-stable (2000-2009: +0.22, 2010-2017: +0.15, 2018-2024:
+  +0.25), while the age-comparable refit reads +0.092 [-0.013, +0.198] — the honest range is the
+  pair of numbers.
+- v0's seat-balanced sex effect on the full window is 1.054 [1.018, 1.090] (significant, unlike
+  the modern window's 1.041) — era-pooled, so it mostly reflects the older-vehicle penalty; the
+  dashboard keeps the modern window as the headline for exactly this reason, via
+  `modern_span()` and per-(family, window) latest-run selection.
+
+**Runtime contract change:** `analyze-v1` now writes 84 rows per run (was 69), and the canonical
+refresh is four runs — `analyze` + `analyze-v1` for the modern window and for the full window
+(`deploy/refresh.sh`).

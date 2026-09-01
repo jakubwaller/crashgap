@@ -17,15 +17,19 @@ from conftest import add_pairs, add_samesex_pairs
 from crashgap.analysis import (
     MOD_YEAR_BANDS,
     POWER_FLOOR,
+    VEHICLE_AGE_MAX,
+    age_comparable,
     analyze_v1,
     condlogit_bootstrap_ci,
     condlogit_by_band,
     condlogit_by_band_separate,
+    condlogit_by_band_vehage,
     condlogit_frame,
     condlogit_pooled,
     condlogit_trend,
     decompose,
     filter_headline_safe,
+    modern_span,
     occupant_frame,
     samesex_pairs_frame,
     samesex_seat_effect,
@@ -550,6 +554,60 @@ def test_band_lower_boundary_pair_is_included(conn):
 
 
 # ---------------------------------------------------------------------------
+# Vehicle-age cap: a band whose apparent female effect is carried entirely by
+# old-at-crash vehicles must read as null once the cap restricts the band to
+# its first VEHICLE_AGE_MAX years on the road - and the capped fit must not
+# leak pairs past the cap.
+# ---------------------------------------------------------------------------
+
+
+def test_vehage_cap_excludes_old_at_crash_vehicles(conn):
+    # 2000-2009-band vehicles seen OLD (age 17): she always dies. Split across
+    # both seat configurations - a single configuration would make x_seat
+    # identical to the band dummy and singularize the fit.
+    case = add_pairs(conn, 1, 20, female_seat=13, female_died=1, male_died=0,
+                     year=2022, mod_year=2005)
+    case = add_pairs(conn, case, 20, female_seat=11, female_died=1, male_died=0,
+                     year=2022, mod_year=2005)
+    # The same band seen NEW (age 3): perfectly balanced deaths.
+    for female_seat in (11, 13):
+        case = add_pairs(conn, case, 10, female_seat=female_seat, female_died=1,
+                         male_died=0, year=2008, mod_year=2005)
+        case = add_pairs(conn, case, 10, female_seat=female_seat, female_died=0,
+                         male_died=1, year=2008, mod_year=2005)
+
+    occ = occupant_frame(conn, (2000, 2024))
+    col = "x_female_band_2000-2009"
+
+    uncapped = condlogit_by_band(occ)
+    assert uncapped.odds_ratio(col) > 1.4  # the old-vehicle pairs dominate
+
+    capped_fit, capped_occ = condlogit_by_band_vehage(occ)
+    assert (capped_occ["year"] - capped_occ["mod_year"]).max() <= VEHICLE_AGE_MAX
+    assert len(capped_occ) == 80  # exactly the year-2008 pairs survive
+    lo, hi = capped_fit.or_ci(col)
+    assert lo < 1.0 < hi  # balanced once the old-at-crash pairs are gone
+
+
+def test_age_comparable_keeps_only_small_gaps():
+    frame = pd.DataFrame({
+        "year": [2022] * 3, "st_case": [1, 2, 3],
+        "drv_died": [1, 1, 1], "pax_died": [0, 0, 0],
+        "drv_age": [40, 40, 40], "pax_age": [40, 50, 51],
+    })
+    kept = age_comparable(frame)
+    assert list(kept.st_case) == [1, 2]  # gap 0 and 10 stay, 11 goes
+    empty = age_comparable(frame.iloc[0:0])
+    assert empty.empty
+
+
+def test_modern_span_pins_the_headline_window():
+    assert modern_span((2000, 2024)) == (2015, 2024)
+    assert modern_span((2015, 2024)) == (2015, 2024)
+    assert modern_span((2020, 2024)) == (2020, 2024)  # never widens past the data
+
+
+# ---------------------------------------------------------------------------
 # analyze_v1 end-to-end: the estimand-name and cohort_def contract the
 # dashboard reads (a silently renamed estimand or dropped cohort_def key
 # would break the power floor without failing any unit test above).
@@ -573,6 +631,7 @@ def test_analyze_v1_writes_the_full_estimand_contract(conn):
         [f"sex_effect_frontal_{{v}}_band_{b}" for b in bands]
         + [f"sex_effect_frontal_{{v}}_band_{b}_separatenuisance" for b in bands]
         + [f"sex_effect_frontal_{{v}}_band_{b}_agepiecewise" for b in bands]
+        + [f"sex_effect_frontal_{{v}}_band_{b}_vehage{VEHICLE_AGE_MAX}" for b in bands]
         + ["sex_effect_frontal_{v}_pooled", "seat_effect_rightfront_frontal_{v}",
            "age_slope_frontal_{v}", "age_curvature_frontal_{v}",
            "sex_trend_slope_frontal_{v}"]
@@ -583,7 +642,7 @@ def test_analyze_v1_writes_the_full_estimand_contract(conn):
         expected.update(f"fars_samesex_{name}_frontal_{v}" for name in (
             "seat_effect_male", "seat_effect_female", "seatsex_interaction",
             "seat_effect_male_ageadj", "seat_effect_female_ageadj",
-            "seatsex_interaction_ageadj"))
+            "seatsex_interaction_ageadj", "seatsex_interaction_ageadj_agecomparable"))
     assert set(rows["estimand"]) == expected
     assert len(rows) == len(expected)
 

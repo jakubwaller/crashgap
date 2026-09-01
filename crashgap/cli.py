@@ -1,9 +1,13 @@
 """Command line interface.
 
-  crashgap ingest --years 2015-2024     download + load FARS into SQLite
-  crashgap analyze --years 2015-2024    double-pair estimates -> results table
-  crashgap analyze-v1 --years 2015-2024 conditional-logit estimates -> results table
+  crashgap ingest --years 2000-2024     download + load FARS into SQLite
+  crashgap analyze --years 2000-2024    double-pair estimates -> results table
+  crashgap analyze-v1 --years 2000-2024 conditional-logit estimates -> results table
   crashgap dashboard                    start the Streamlit dashboard
+
+The dashboard reads two windows - the modern decade for the headline and the
+full ingested span for the trend/same-sex sections - so the canonical refresh
+runs analyze and analyze-v1 once per window (see deploy/refresh.sh).
 """
 
 from __future__ import annotations
@@ -33,18 +37,18 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_ingest = sub.add_parser("ingest", help="download + load FARS years")
-    p_ingest.add_argument("--years", default="2015-2024", help="e.g. 2015-2024 or 2022")
+    p_ingest.add_argument("--years", default="2000-2024", help="e.g. 2000-2024 or 2022")
     p_ingest.add_argument("--data-dir", default=DEFAULT_RAW,
                           help=f"where zips are cached (default {DEFAULT_RAW})")
 
     p_analyze = sub.add_parser("analyze", help="run the double-pair estimates")
-    p_analyze.add_argument("--years", default="2015-2024")
+    p_analyze.add_argument("--years", default="2000-2024")
     p_analyze.add_argument("--reps", type=int, default=2000,
                            help="bootstrap replicates (default 2000)")
 
     p_analyze_v1 = sub.add_parser("analyze-v1",
                                   help="run the within-vehicle conditional-logit estimates")
-    p_analyze_v1.add_argument("--years", default="2015-2024")
+    p_analyze_v1.add_argument("--years", default="2000-2024")
     p_analyze_v1.add_argument("--reps", type=int, default=2000,
                               help="same-sex channel bootstrap replicates (default 2000)")
 

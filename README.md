@@ -35,6 +35,11 @@ the female multiplier and *s* the right-front multiplier, the two configurations
 So on FARS 2015–2024, in the primary frontal cut, **the seat matters more than the sex**, and the
 1.09 pooled figure is mostly a seat effect wearing a sex label.
 
+(The headline deliberately stays on the modern decade even though the database now holds FARS
+2000–2024: "does being female raise fatality risk in the same crash *today*" should not quietly
+absorb 1990s vehicles as history is ingested. The full span exists for the model-year trend and
+same-sex sections below, where the older vehicle bands actually have power.)
+
 **The cuts disagree, and that's informative.** In the strict head-on cut (`MAN_COLL=2`) the female
 effect is **+11.5% and significant**, while the seat effect *reverses* — the driver fares worse.
 That's physically plausible rather than noise: head-on collisions are predominantly offset toward
@@ -88,11 +93,15 @@ Two new estimand families, kept structurally apart:
   coefficient; `sex_trend_slope_*` is a separate continuous model-year trend fit (never jointly with
   the band dummies — band is a coarsened function of year, so the two are collinear together);
   `seat_effect_rightfront_*`, `age_slope_*`, and `age_curvature_*` are the shared nuisance
-  coefficients. Every `_band_*` row also comes in two sensitivity variants: `_separatenuisance`
-  (seat/age refit independently inside that band, instead of pooled across bands) and
-  `_agepiecewise` (age entered as piecewise-linear with a knot at 65, instead of quadratic). Neither
-  sensitivity variant is headlined — they exist to show whether the default's pooling and
-  functional-form choices are load-bearing.
+  coefficients. Every `_band_*` row also comes in three sensitivity variants: `_separatenuisance`
+  (seat/age refit independently inside that band, instead of pooled across bands),
+  `_agepiecewise` (age entered as piecewise-linear with a knot at 65, instead of quadratic), and
+  `_vehage12` (vehicles at most 12 years old at crash, putting the bands on comparable
+  vehicle-age support at the price of making band and calendar period nearly synonymous — the
+  same mixing the published FARS trend estimates accept). No sensitivity variant is headlined —
+  they exist to show whether the default's pooling, functional-form and period-mixing choices are
+  load-bearing, and a band-level claim that doesn't hold across all of them is treated as a claim
+  about an assumption, not about the data.
 - **`fars_samesex_*`** — a structurally separate channel: **right-front-passenger-vs-driver**
   fatality odds (a value above 1 means the passenger seat is the deadlier one) within discordant
   male-male pairs and, separately, discordant female-female pairs. This is what actually
@@ -104,7 +113,10 @@ Two new estimand families, kept structurally apart:
   refit each baseline with a quadratic within-pair age-difference term and are the headline
   versions: the two cohorts differ sharply in within-pair age structure (female-female pairs carry
   a much older right-front passenger far more often), so the raw ORs mix the seat effect with who
-  sits where at what age. This channel never shares nuisance parameters with the mixed-sex channel,
+  sits where at what age. `seatsex_interaction_ageadj_agecomparable_*` is the fragility check on
+  the adjusted headline: the same fit restricted to pairs with a within-pair age gap of at most
+  10 years, where the quadratic adjustment interpolates instead of extrapolating — quote it next
+  to the full-cohort `_ageadj` row, never one without the other. This channel never shares nuisance parameters with the mixed-sex channel,
   and same-sex pairs re-admit some of the confounding the double-pair design exists to close (who
   rides with whom isn't random), so every interaction number here carries a weaker identifying
   assumption than everything else on this page — the dashboard says so next to the number, not in a
@@ -126,27 +138,38 @@ true seat-balanced sex effect. Read both, not one instead of the other.
 SQL. `n_pairs` (eligible) and `n_discordant_pairs` (informative, what the fit actually used) are
 tracked separately in every v1 row for exactly this reason.
 
-**The trend question: age adjustment does not settle it — the direction is unidentified on this
-window.** The naive unadjusted per-band ratio rises across model-year bands (1970s–90s vehicles
-through 2017+), and so does the default age-adjusted
-`fars_condlogit_sex_effect_frontal_core_band_*` (1.13 → 1.16 → 1.18 → 1.26). But the
-`_separatenuisance` sensitivity fit — the same per-band female OR with seat/age refit inside each
-band instead of pooled — runs the other way: **1.26 → 1.21 → 1.18 → 1.10, a monotone decline in the
-published direction**. And the data reject the pooled model's own identifying assumption: the
-age-adjusted seat effect is not constant across bands (0.89 [0.72–1.10] in the oldest band up to
-**1.34 [1.17–1.53]** in the newest — CIs disjoint), and with the female occupant in the right-front
-seat in ~74% of pairs in every band, a band-varying seat effect that the pooled model averages away
-loads directly onto the per-band female dummies. The continuous `sex_trend_slope_frontal_core`
-model (fit with `mod_year` windowed to 1970–2026, the same span the bands cover — FARS's 9999 "not
-reported" sentinel and a few implausible pre-1970 model years never reach the fit as leverage
-points on what is otherwise a raw numeric regressor) is **+0.044** log-odds per decade (95% CI
-−0.026 to +0.115, straddling zero) for core, and inherits the same pooling assumption the band
-data reject. The piecewise-linear age variant agrees with the quadratic default to within ~0.1% in
-every band, so age functional form isn't what's driving any of this. Net: on 2015–2024 FARS **the
-trend direction is unidentified** — it rises under pooled nuisance, falls monotonically under
-per-band nuisance, the data reject pooling, and no pairwise band contrast is significant under
-either specification. Extending ingestion back to 2000–2014 (thickening the two oldest bands,
-which are nearly extinct by 2015) is the scoped follow-up that could actually move this.
+**The trend question, on the full 2000–2024 window: the decline into the 2000s is real; a
+continued decline into the newest vehicles is not found.** This was the scoped follow-up from the
+v1 release, whose 2015–2024 window left the trend direction unidentified (the per-band pattern
+flipped with the nuisance-pooling assumption, and the two oldest bands had almost no power —
+vehicles from the 1990s are nearly extinct on modern roads). Ingesting FARS 2000–2014 multiplied
+the oldest band's discordant pairs by ten (553 → 5,532), and the picture that emerges is
+two-sided:
+
+- **What is now identified:** pre-2000 vehicles carry a clearly higher age-adjusted female
+  penalty than 2000s vehicles — `fars_condlogit_sex_effect_frontal_core_band_1970-1999` = 1.26
+  [1.19–1.33] against `band_2000-2009` = 1.09 [1.03–1.15], with disjoint CIs under **every**
+  specification (default pooled-nuisance, `_separatenuisance`, `_vehage12`, `_agepiecewise`).
+  That reproduces the *direction* of the published Atwood/Noh/Craig decline, in-window, for the
+  first time in this project.
+- **What is still not found:** any decline after the 2000s band. The 2010–2016 and 2017–2026
+  point estimates sit at or above the 2000s level in every specification (2010–2016: 1.14–1.18;
+  2017–2026: 1.10–1.26), no post-2000 pairwise contrast has disjoint CIs under any
+  specification, and the newest band still flips with the nuisance choice (1.26 pooled vs 1.10
+  separate — the age-adjusted seat effect varies by band, roughly 1.0 in the older bands vs
+  **1.34 [1.17–1.53]** in 2017+, so the data reject pooling exactly where it matters most). The
+  continuous `sex_trend_slope_frontal_core` over the full span is **−0.025** log-odds per decade
+  (95% CI −0.062 to +0.013): consistent with a slow decline and with zero. The published
+  continued shrink to ~5.8% in the newest bands is *not* reproduced — which may reflect the
+  2020–2024 calendar years this window adds beyond that study's 2019 endpoint (a period whose
+  crash mix shifted sharply), or a genuine plateau; model year, vehicle age and calendar period
+  are linearly dependent and none of them varies within a vehicle, so this design cannot say
+  which.
+
+The piecewise-linear age variant agrees with the quadratic default to within ~0.2% in every band,
+so age functional form isn't what's driving any of this; and the `mod_year` regressor stays
+windowed to 1970–2026, so FARS's 9999 "not reported" sentinel never reaches the continuous fit as
+a leverage point.
 
 One number worth flagging so the page doesn't look self-contradictory: the age-adjusted, pooled
 seat effect (`fars_condlogit_seat_effect_rightfront_frontal_core` = 1.05 [0.99–1.12]) is about half
@@ -154,64 +177,78 @@ of v0's +10.8% and no longer significant — age adjustment and the band-varying
 absorb much of what v0's geometric-mean split attributed to the seat — and the head-on cut flips it
 clearly protective (0.81 [0.73–0.89]), consistent with v0's head-on reversal.
 
-**The seat × sex interaction: the raw asymmetry is mostly age composition, and what survives
-adjustment is fragile.** The raw passenger-vs-driver baselines do run in opposite directions by
-sex: among male-male pairs the *driver* dies more often (right-front OR 0.85, CI 0.79–0.92,
-n=2,453 discordant pairs); among female-female pairs the *passenger* does (OR 1.61, CI 1.46–1.77,
-n=1,788). The raw interaction **log**-ratio is +0.63 (CI +0.51 to +0.76, null = 0) for core — a
-1.9× ratio on the multiplicative scale. But the two cohorts sit on radically different age
-structures: female-female pairs carry a right-front passenger 11+ years older than the driver in
-~39% of discordant pairs (male-male: the passenger averages slightly *younger*), and age — not
-seat — is what kills in those pairs. The `_ageadj` rows adjust each baseline for the within-pair
-age difference, and roughly 60% of the raw log-ratio evaporates: adjusted male-male 0.90
-[0.83–0.98], female-female 1.15 [1.02–1.30], interaction **+0.25 (CI +0.10 to +0.40)** for core.
-The residual is statistically significant but rests on the large-age-gap (plausibly parent–child)
-pairs where the quadratic age model extrapolates furthest; restricted to age-comparable pairs the
-interaction is null. Read it as **an unadjusted asymmetry driven substantially by who sits where
-at what age, with a smaller adjusted residual that is not robust evidence of a female-specific
-frontal seat penalty** — not as a settled interaction. The same-sex-pair identifying assumption in
-§3/§6 of the design notes applies in full on top of all this — same-sex pairs aren't sex-paired
-within the same crash, so who rides with whom could correlate with severity or vehicle type in
-ways the mixed-pair design rules out by construction.
+**The seat × sex interaction, on the full 2000–2024 window: the raw asymmetry is mostly age
+composition; what survives adjustment is now significant and era-stable, but its size still
+depends on the age model.** The raw passenger-vs-driver baselines run in opposite directions by
+sex: among male-male pairs the *driver* dies more often (right-front OR 0.89, CI 0.85–0.94,
+n=7,140 discordant pairs); among female-female pairs the *passenger* does (OR 1.56, CI 1.47–1.65,
+n=4,744). The raw interaction **log**-ratio is +0.56 (CI +0.48 to +0.63, null = 0) for core. But
+the two cohorts sit on very different age structures (a female-female pair carries a right-front
+passenger 11+ years older roughly twice as often as a male-male pair does), and age — not seat —
+is what kills in those pairs. The `_ageadj` rows adjust each baseline for the within-pair age
+difference and most of the raw log-ratio evaporates: adjusted male-male 0.91 [0.86–0.95],
+female-female 1.12 [1.04–1.20], interaction **+0.21 (CI +0.12 to +0.30)** for core. On the v1
+release's 2015–2024 window alone this residual looked fragile; with 2.5× the discordant pairs it
+is statistically solid and stable in direction across calendar eras (2000–2009: +0.22, 2010–2017:
++0.15, 2018–2024: +0.25 — two of the three individually significant; rerun via
+`age_comparable`/`seatsex_interaction_ageadj` on era-filtered frames). What keeps it short of
+settled is the `_agecomparable` fragility row: restricted to pairs within 10 years of each other —
+where the quadratic age model interpolates instead of extrapolating — the interaction reads
+**+0.09 (CI −0.01 to +0.20)**, roughly half the full-cohort value with a CI touching zero. The
+honest read is **consistent evidence of a female-specific right-front penalty of modest size,
+with the magnitude uncertain between roughly +10% and +23% and carried disproportionately by
+large-age-gap pairs**. The same-sex-pair identifying assumption in §3/§6 of the design notes
+applies in full on top of all this — same-sex pairs aren't sex-paired within the same crash, so
+who rides with whom could correlate with severity or vehicle type in ways the mixed-pair design
+rules out by construction.
 
 ## Usage
 
 ```bash
 pip install -e .
-crashgap ingest --years 2015-2024    # ~300 MB of zips from static.nhtsa.gov, cached in data/raw
-crashgap analyze --years 2015-2024   # pooled + decomposed estimates -> results table + stdout
-crashgap dashboard                   # Streamlit tile on :8501
+crashgap ingest --years 2000-2024      # ~470 MB of zips from static.nhtsa.gov, cached in data/raw
+crashgap analyze --years 2015-2024     # modern-window estimates (the dashboard headline)
+crashgap analyze --years 2000-2024     # full-window estimates (the trend sections)
+crashgap analyze-v1 --years 2015-2024  # conditional-logit rows, modern window
+crashgap analyze-v1 --years 2000-2024  # conditional-logit rows, full window
+crashgap dashboard                     # Streamlit tile on :8501
 ```
 
-Everything lands in `data/crashgap.db`. Re-running either step is idempotent. v0's `analyze` writes
-three estimands per frontal cut: the seat-balanced sex effect, the right-front seat effect, and the
-pooled ratio explicitly named `_seatconfounded` so it can never be mistaken for the headline. v1
-adds the `fars_condlogit_*` and `fars_samesex_*` rows described above, under the same `results`
-table and the same `run_ts` per run, and never touches or renumbers v0's rows.
+Everything lands in `data/crashgap.db`. Re-running any step is idempotent. The dashboard reads the
+latest run per (estimand family, window) — the modern decade feeds the headline sections, the full
+span feeds the trend and same-sex sections — so both windows need both `analyze` and `analyze-v1`
+runs. v0's `analyze` writes three estimands per frontal cut: the seat-balanced sex effect, the
+right-front seat effect, and the pooled ratio explicitly named `_seatconfounded` so it can never be
+mistaken for the headline. v1 adds the `fars_condlogit_*` and `fars_samesex_*` rows described
+above, under the same `results` table and the same `run_ts` per run, and never touches or renumbers
+v0's rows.
 
 ## Refresh
 
 FARS publishes one new year annually (and finalizes the previous ARF release). `deploy/refresh.sh`
-re-pulls the two newest years and re-runs the analysis; point a monthly cron at it and the numbers
-update themselves when NHTSA ships.
+re-pulls the two newest years and re-runs all four analysis passes (both windows × both estimand
+families); point a monthly cron at it and the numbers update themselves when NHTSA ships.
 
 ## Roadmap
 
-- **v1** (this release) — the age-adjusted conditional logit and same-sex seat × sex interaction
-  described above. It settles *neither* headline question: the model-year trend direction is
-  unidentified on this window (it flips with the nuisance-pooling assumption, which the data
-  reject), and the interaction that survives age adjustment is fragile — see the honest reads
-  above. What v1 does settle is *why* the naive versions of both numbers mislead. Extending
-  ingestion to 2000–2014 to thicken the two oldest bands is the natural next step for the trend
-  specifically.
-- **v2** — CISS/NASS-CDS with MAIS injury grading and survey weights: the rung that reaches the
-  severity-adjusted odds ratios the literature reports.
+- **v1** — the age-adjusted conditional logit and same-sex seat × sex interaction described above,
+  plus the 2000–2014 ingestion follow-up that put the trend question on a full 25-year window.
+  Where that landed: the decline into the 2000s is identified, a continued decline is not found,
+  and the adjusted interaction is significant and era-stable but age-model-dependent in size — see
+  the honest reads above.
+- **v2** (in progress) — CISS/NASS-CDS with MAIS injury grading and survey weights: the rung that
+  reaches the severity-adjusted odds ratios the literature reports (Bose 2011 MAIS 3+ OR 1.47;
+  Craig 2024 MAIS 2+ OR ~1.75).
 
 ## Data
 
-NHTSA FARS National CSV releases, 1975–2024, US public domain. This repo pools 2015–2024, where the
-codings the analysis touches are stable. The 2024 file is an Annual Report File and gets revised by
-NHTSA before final release.
+NHTSA FARS National CSV releases, 1975–2024, US public domain. This repo pools 2000–2024. Two FARS
+recodes sit inside that span and were verified against the real files before widening it (see
+`crashgap/codebook.py`): the unknown-age sentinel changed schemes in 2009 (99 → 998/999; both fall
+outside the 16–96 age window), and IMPACT1 gained side-specific codes in 2010 (which drains the
+*wide* frontal variant's clock points 2 and 10 — the core zone {11, 12, 1} and the MAN_COLL=2
+head-on cut are continuous across the boundary). The 2024 file is an Annual Report File and gets
+revised by NHTSA before final release.
 
 ## License
 

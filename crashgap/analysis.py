@@ -252,6 +252,19 @@ def decompose(conn: sqlite3.Connection, years: tuple[int, int],
 
 MOD_YEAR_BANDS = [(1970, 1999), (2000, 2009), (2010, 2016), (2017, 2026)]
 
+# The dashboard's headline window: the newest MODERN_WINDOW calendar years of
+# whatever is ingested. The full ingested span exists to power the model-year
+# trend question; the headline "does being female raise fatality risk in the
+# same crash" claim stays pinned to the modern decade so it never quietly
+# absorbs 1990s vehicles as more history is ingested.
+MODERN_WINDOW = 10
+
+
+def modern_span(years: tuple[int, int]) -> tuple[int, int]:
+    """The last MODERN_WINDOW calendar years of an ingested (y0, y1) span."""
+    y0, y1 = years
+    return (max(y0, y1 - MODERN_WINDOW + 1), y1)
+
 
 def by_model_year_band(conn: sqlite3.Connection, years: tuple[int, int],
                        frontal: str = "core", reps: int = 1000) -> pd.DataFrame:
@@ -637,6 +650,32 @@ def condlogit_by_band_separate(occ: pd.DataFrame,
     return out
 
 
+# With calendar years 2000-2024 pooled, a model-year band is observed at very
+# different vehicle ages across bands: a 1995 vehicle enters this data mostly
+# at age 5-25, a 2020 vehicle only at age 0-4. Vehicle age at crash (who still
+# drives a 20-year-old car, how it is maintained, where it crashes) is a
+# between-band confounder of the female-effect trend that the within-vehicle
+# design cannot difference away - it is constant within a pair. This cap
+# restricts every band to its first VEHICLE_AGE_MAX years on the road, putting
+# the bands on comparable vehicle-age support; the price is that band and
+# calendar period become nearly synonymous, so the capped fit reads as
+# "model-year trend and period trend jointly", same as the published FARS
+# trend estimates. Run next to the uncapped fit, never instead of it.
+VEHICLE_AGE_MAX = 12
+
+
+def condlogit_by_band_vehage(occ: pd.DataFrame,
+                             age_form: str = "quadratic") -> tuple[CondLogit, pd.DataFrame]:
+    """The default band model refit on vehicles at most VEHICLE_AGE_MAX years
+    old at crash. Returns the fit plus the capped occupant frame (the caller
+    needs the latter for per-band counts). No lower bound: mod_year one year
+    ahead of the calendar year is a normal new-model-year sale, not an error."""
+    capped = occ[(occ["year"] - occ["mod_year"]) <= VEHICLE_AGE_MAX]
+    paired = _pivot_pairs(capped)
+    frame = condlogit_frame(capped, band_mode="bands", age_form=age_form)
+    return fit_condlogit(frame, n_pairs=len(paired)), capped
+
+
 def condlogit_trend(occ: pd.DataFrame, age_form: str = "quadratic") -> CondLogit:
     """Continuous model-year trend (log-odds female effect per decade),
     fit separately from the band dummies - never jointly, band being a
@@ -818,6 +857,26 @@ def seatsex_interaction(male_frame: pd.DataFrame, female_frame: pd.DataFrame,
     )
 
 
+# The age-adjusted interaction leans on the quadratic age model most heavily
+# in exactly the large-age-gap (plausibly parent-child) pairs that dominate
+# what remains of the effect after adjustment. This cap defines the
+# "age-comparable" diagnostic subset: pairs whose within-pair age gap is small
+# enough that the adjustment interpolates rather than extrapolates. The
+# interaction refit on this subset is the fragility check for the full-cohort
+# ageadj row - if the two disagree, the difference is carried by the pairs
+# where the age model is trusted furthest.
+AGE_COMPARABLE_GAP = 10
+
+
+def age_comparable(frame: pd.DataFrame,
+                   max_gap: int = AGE_COMPARABLE_GAP) -> pd.DataFrame:
+    """Same-sex pairs whose |passenger age - driver age| <= max_gap."""
+    if frame.empty:
+        return frame
+    gap = (frame["pax_age"] - frame["drv_age"]).abs()
+    return frame[gap <= max_gap].reset_index(drop=True)
+
+
 def samesex_condlogit_frame(frame: pd.DataFrame) -> pd.DataFrame:
     """Same-sex pairs -> a fit-ready differenced frame for the AGE-ADJUSTED
     seat baseline: y = 1 iff the right-front PASSENGER died, x_const carries
@@ -993,6 +1052,18 @@ def analyze_v1(conn: sqlite3.Connection, years: tuple[int, int], reps: int = 200
                 years, frontal, pw_fit.odds_ratio(col), pw_fit.or_ci(col),
                 info["n_pairs"], info["n_discordant_pairs"], info["n_crashes"])
 
+        vehage_fit, vehage_occ = condlogit_by_band_vehage(occ)
+        vehage_info = _band_counts(_pivot_pairs(vehage_occ))
+        for lo, hi in MOD_YEAR_BANDS:
+            label = f"{lo}-{hi}"
+            col = f"x_female_band_{label}"
+            info = vehage_info[label]
+            write_result_v1(
+                conn, run_ts,
+                f"fars_condlogit_sex_effect_frontal_{frontal}_band_{label}_vehage{VEHICLE_AGE_MAX}",
+                years, frontal, vehage_fit.odds_ratio(col), vehage_fit.or_ci(col),
+                info["n_pairs"], info["n_discordant_pairs"], info["n_crashes"])
+
         trend_fit = condlogit_trend(occ)
         trend_point = trend_fit.coef.get("x_trend")
         write_result_v1(
@@ -1049,4 +1120,24 @@ def analyze_v1(conn: sqlite3.Connection, years: tuple[int, int], reps: int = 200
             len(male_frame) + len(female_frame),
             male_adj.n_discordant_pairs + female_adj.n_discordant_pairs,
             male_crashes + female_crashes)
+
+        # Fragility check for the row above: the same age-adjusted interaction
+        # refit on age-comparable pairs only, where the quadratic age model
+        # interpolates instead of extrapolating.
+        male_cmp, female_cmp = age_comparable(male_frame), age_comparable(female_frame)
+        male_cmp_adj = samesex_seat_effect_ageadj(male_cmp)
+        female_cmp_adj = samesex_seat_effect_ageadj(female_cmp)
+        interaction_cmp = seatsex_interaction_ageadj(male_cmp, female_cmp)
+        cmp_crashes = (
+            (male_cmp.groupby(["year", "st_case"]).ngroups if len(male_cmp) else 0)
+            + (female_cmp.groupby(["year", "st_case"]).ngroups if len(female_cmp) else 0))
+        write_result_v1(
+            conn, run_ts,
+            f"fars_samesex_seatsex_interaction_ageadj_agecomparable_frontal_{frontal}",
+            years, frontal,
+            interaction_cmp.log_ratio if interaction_cmp else None,
+            (interaction_cmp.ci_lo, interaction_cmp.ci_hi) if interaction_cmp else (None, None),
+            len(male_cmp) + len(female_cmp),
+            male_cmp_adj.n_discordant_pairs + female_cmp_adj.n_discordant_pairs,
+            cmp_crashes)
     return run_ts

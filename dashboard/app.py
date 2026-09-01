@@ -766,6 +766,10 @@ the special case with no age variation. The seat × sex interaction is not fit f
 pairs at all (see the caveats above); it comes from the separate same-sex channel.
 """)
 
+st.subheader("How this site is made")
+st.markdown("I do use AI to help me with coding and drafting texts. Everything goes through "
+            "my human eyes though.")
+
 with st.expander("Cohort definition (serialized, as stored with the result)"):
     st.json(json.loads(sex.cohort_def))
 

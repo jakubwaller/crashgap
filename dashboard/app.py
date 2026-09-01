@@ -12,7 +12,8 @@ female raise fatality risk in the same crash today" never quietly absorbs
 read the full ingested span, where the older model-year bands actually have
 power. Every number states which window it comes from.
 
-Every caveat is printed on the page, not tucked into a tooltip.
+The page leads with charts and short claims; the full prose sits in
+expanders on the same page, one click away, never in a tooltip.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import os
 import sqlite3
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -297,6 +299,129 @@ def pct(x: float | None) -> str:
     return f"{(x - 1) * 100:+.1f}%" if x else "n/a"
 
 
+# Chart colors: one data hue plus a neutral for reference lines, benchmarks and
+# low-power de-emphasis. Identity never rides on color alone - low-power marks
+# are labeled, benchmarks get their own shape and a legend.
+BLUE = "#3987e5"
+GRAY = "#898781"
+
+
+def split_chart(core) -> alt.Chart:
+    """The headline decomposition as a picture: her-vs-his death ratio in the
+    two seat configurations, with the parity line. The flip across 1.0 is the
+    seat effect."""
+    df = pd.DataFrame([
+        {"configuration": "she rides passenger", "ratio": core.rr_she_passenger,
+         "pairs": core.n_pairs_she_passenger},
+        {"configuration": "she drives", "ratio": core.rr_she_drives,
+         "pairs": core.n_pairs_she_drives},
+    ])
+    bars = alt.Chart(df).mark_bar(color=BLUE, size=26, cornerRadiusEnd=4).encode(
+        x=alt.X("ratio:Q", title="her deaths : his deaths",
+                scale=alt.Scale(domain=[0, 1.3])),
+        y=alt.Y("configuration:N", title=None, sort=None),
+        tooltip=[alt.Tooltip("configuration:N"),
+                 alt.Tooltip("ratio:Q", format=".3f"),
+                 alt.Tooltip("pairs:Q", format=",")])
+    labels = alt.Chart(df).mark_text(align="left", dx=6, color=GRAY).encode(
+        x="ratio:Q", y=alt.Y("configuration:N", sort=None),
+        text=alt.Text("ratio:Q", format=".2f"))
+    rule = alt.Chart(pd.DataFrame({"x": [1.0]})).mark_rule(
+        color=GRAY, strokeWidth=2, strokeDash=[4, 3]).encode(x="x:Q")
+    return (bars + labels + rule).properties(height=130)
+
+
+def trend_chart(bands: pd.DataFrame) -> alt.Chart | None:
+    """Age-adjusted female OR per model-year band with 95% CI. Low-power bands
+    render gray (the same headline_safe rule as the table), never dropped."""
+    df = bands.dropna(subset=["adj_point"]).copy()
+    if df.empty:
+        return None
+    df["power"] = df["headline_safe"].map(lambda ok: "ok" if ok else "low power")
+    color = alt.Color(
+        "power:N", title=None,
+        scale=alt.Scale(domain=["ok", "low power"], range=[BLUE, GRAY]),
+        legend=None if (df["power"] == "ok").all() else alt.Legend(orient="top"))
+    tooltip = [alt.Tooltip("mod_year_band:N", title="model years"),
+               alt.Tooltip("adj_point:Q", format=".2f", title="female OR"),
+               alt.Tooltip("adj_ci_lo:Q", format=".2f", title="CI low"),
+               alt.Tooltip("adj_ci_hi:Q", format=".2f", title="CI high"),
+               alt.Tooltip("n_discordant_pairs:Q", format=",", title="discordant pairs"),
+               alt.Tooltip("power:N")]
+    x = alt.X("mod_year_band:N", title="vehicle model years", sort=None,
+              axis=alt.Axis(labelAngle=0))
+    base = alt.Chart(df)
+    ci = base.mark_rule(strokeWidth=2).encode(
+        x=x, y=alt.Y("adj_ci_lo:Q", title="age-adjusted female odds ratio",
+                     scale=alt.Scale(zero=False)),
+        y2="adj_ci_hi:Q", color=color, tooltip=tooltip)
+    pts = base.mark_point(filled=True, size=90).encode(
+        x=x, y="adj_point:Q", color=color, tooltip=tooltip)
+    labels = base.mark_text(align="left", dx=10, color=GRAY).encode(
+        x=x, y="adj_point:Q", text=alt.Text("adj_point:Q", format=".2f"))
+    rule = alt.Chart(pd.DataFrame({"y": [1.0]})).mark_rule(
+        color=GRAY, strokeWidth=2, strokeDash=[4, 3]).encode(y="y:Q")
+    return (ci + pts + labels + rule).properties(height=260)
+
+
+def severity_chart(sev: pd.DataFrame) -> alt.Chart | None:
+    """The delta-V-adjusted severity ORs with CIs, against the published
+    benchmarks (Craig 2024 for MAIS 2+, Bose 2011 for MAIS 3+) as gray
+    diamonds. Below-floor cells fade and say so in the tooltip."""
+    cells = {("ciss", "mais2plus"): "CISS · MAIS 2+",
+             ("ciss", "mais3plus"): "CISS · MAIS 3+",
+             ("nass", "mais2plus"): "NASS · MAIS 2+",
+             ("nass", "mais3plus"): "NASS · MAIS 3+"}
+    benchmarks = {"mais2plus": ("Craig 2024", 1.75), "mais3plus": ("Bose 2011", 1.47)}
+    est_rows, bench_rows = [], []
+    for (source, outcome), label in cells.items():
+        r = _sev_row(sev, f"{source}_svylogit_female_or_{outcome}_frontal_dv")
+        if r is None or pd.isna(r.point):
+            continue
+        est_rows.append({"cell": label, "point": r.point, "ci_lo": r.ci_lo,
+                         "ci_hi": r.ci_hi,
+                         "power": "ok" if _sev_ok(r) else "low power"})
+        name, val = benchmarks[outcome]
+        bench_rows.append({"cell": label, "point": val, "benchmark": name})
+    if not est_rows:
+        return None
+    order = [label for label in cells.values()
+             if label in {r["cell"] for r in est_rows}]
+    series = alt.Scale(domain=["this analysis (ΔV-adjusted)", "published benchmark"],
+                       range=[BLUE, GRAY])
+    shapes = alt.Scale(domain=["this analysis (ΔV-adjusted)", "published benchmark"],
+                       range=["circle", "diamond"])
+    est = pd.DataFrame(est_rows)
+    est["series"] = "this analysis (ΔV-adjusted)"
+    bench = pd.DataFrame(bench_rows)
+    bench["series"] = "published benchmark"
+    faded = alt.condition(alt.datum.power == "low power",
+                          alt.value(0.45), alt.value(1.0))
+    y = alt.Y("cell:N", title=None, sort=order)
+    ci = alt.Chart(est).mark_rule(strokeWidth=2, color=BLUE).encode(
+        x=alt.X("ci_lo:Q", title="female odds ratio", scale=alt.Scale(zero=False)),
+        x2="ci_hi:Q", y=y, opacity=faded)
+    pts = alt.Chart(est).mark_point(filled=True, size=90).encode(
+        x="point:Q", y=y, opacity=faded,
+        color=alt.Color("series:N", title=None, scale=series,
+                        legend=alt.Legend(orient="top")),
+        shape=alt.Shape("series:N", title=None, scale=shapes),
+        tooltip=[alt.Tooltip("cell:N"), alt.Tooltip("point:Q", format=".2f"),
+                 alt.Tooltip("ci_lo:Q", format=".2f", title="CI low"),
+                 alt.Tooltip("ci_hi:Q", format=".2f", title="CI high"),
+                 alt.Tooltip("power:N")])
+    marks = alt.Chart(bench).mark_point(filled=True, size=110).encode(
+        x="point:Q", y=y,
+        color=alt.Color("series:N", title=None, scale=series,
+                        legend=alt.Legend(orient="top")),
+        shape=alt.Shape("series:N", title=None, scale=shapes),
+        tooltip=[alt.Tooltip("cell:N"), alt.Tooltip("benchmark:N"),
+                 alt.Tooltip("point:Q", format=".2f")])
+    rule = alt.Chart(pd.DataFrame({"x": [1.0]})).mark_rule(
+        color=GRAY, strokeWidth=2, strokeDash=[4, 3]).encode(x="x:Q")
+    return (ci + pts + marks + rule).properties(height=230)
+
+
 st.title("CrashGap")
 st.caption("Female-vs-male fatality risk in the same crash, computed live from "
            "public-domain NHTSA FARS data, with the seat-position confound "
@@ -319,10 +444,8 @@ row = results.set_index("estimand")
 sex, seat, pooled = row.loc[SEX + "core"], row.loc[SEAT + "core"], row.loc[POOLED + "core"]
 strata = load_strata(DB_PATH, mspan)
 
-st.markdown(f"**Headline window: FARS {MODERN}** (the modern decade). The model-year trend "
-            f"and seat × sex sections further down use the full ingested span "
-            f"(FARS {FULL}), where the older vehicle bands have power; every number "
-            f"below says which window it comes from.")
+st.markdown(f"Headline: FARS {MODERN}, the modern decade. The trend and same-sex sections "
+            f"use the full span, FARS {FULL}. Every number says which window it uses.")
 
 left, right = st.columns(2)
 left.metric("Being female (seat-balanced)", pct(sex.point),
@@ -341,37 +464,41 @@ it by **{pct(sex.point)}**, and in this modern window that is not distinguishabl
 st.error(f"""Pooling the pairs without splitting by seat gives a female-vs-male ratio of
 **{pooled.point:.2f}×**, which reads like a {pct(pooled.point)} female penalty. Most of it is
 the seat effect: women are the passenger in {strata['core'].n_pairs_she_passenger:,} of the
-{strata['core'].n_pairs:,} pairs and the driver in only
-{strata['core'].n_pairs_she_drives:,}, so "female" and "right-front" are ~73/27 collinear. Split
-them and the female share of that gap largely disappears.""")
+{strata['core'].n_pairs:,} pairs, so "female" and "right-front" are ~73/27 collinear.""")
 
-st.subheader(f"The split, in raw counts (FARS {MODERN})")
 core = strata["core"]
-st.dataframe(pd.DataFrame([
-    {"configuration": "she is the passenger, he drives",
-     "pairs": core.n_pairs_she_passenger, "ratio (she died : he died)": core.rr_she_passenger},
-    {"configuration": "she drives, he is the passenger",
-     "pairs": core.n_pairs_she_drives, "ratio (she died : he died)": core.rr_she_drives},
-]), hide_index=True)
-st.caption("If sex alone drove the outcome these two ratios would agree. They don't: the ratio "
-           "flips below 1.0 when she is the one driving, which is the seat effect showing "
-           "through. The geometric mean of the two cancels seat and isolates sex; their "
-           "geometric ratio cancels sex and isolates seat (Evans' double-pair decomposition).")
+st.markdown(f"**Who died, her vs him, by who drives (FARS {MODERN})**")
+st.altair_chart(split_chart(core), width="stretch")
+st.caption("The ratio flips below 1.0 when she drives. That flip is the seat effect.")
 
-st.subheader("Does the frontal definition change the story?")
-sens = pd.DataFrame([
-    {"frontal cut": v,
-     "sex effect": pct(d.sex_effect),
-     "sex 95% CI": f"{pct(d.sex_ci[0])} to {pct(d.sex_ci[1])}",
-     "sex sig.": "yes" if d.sex_is_significant else "no",
-     "seat effect": pct(d.seat_effect),
-     "seat sig.": "yes" if d.seat_is_significant else "no",
-     "pairs": d.n_pairs}
-    for v, d in strata.items()
-])
-st.dataframe(sens, hide_index=True)
-_headon = strata["headon"]
-st.warning(f"""The cuts disagree, and the disagreement carries information. In the two broad
+with st.expander("The raw counts and the frontal cuts"):
+    st.dataframe(pd.DataFrame([
+        {"configuration": "she is the passenger, he drives",
+         "pairs": core.n_pairs_she_passenger,
+         "ratio (she died : he died)": core.rr_she_passenger},
+        {"configuration": "she drives, he is the passenger",
+         "pairs": core.n_pairs_she_drives,
+         "ratio (she died : he died)": core.rr_she_drives},
+    ]), hide_index=True)
+    st.caption("If sex alone drove the outcome these two ratios would agree. They don't: the "
+               "ratio flips below 1.0 when she is the one driving, which is the seat effect "
+               "showing through. The geometric mean of the two cancels seat and isolates sex; "
+               "their geometric ratio cancels sex and isolates seat (Evans' double-pair "
+               "decomposition).")
+
+    sens = pd.DataFrame([
+        {"frontal cut": v,
+         "sex effect": pct(d.sex_effect),
+         "sex 95% CI": f"{pct(d.sex_ci[0])} to {pct(d.sex_ci[1])}",
+         "sex sig.": "yes" if d.sex_is_significant else "no",
+         "seat effect": pct(d.seat_effect),
+         "seat sig.": "yes" if d.seat_is_significant else "no",
+         "pairs": d.n_pairs}
+        for v, d in strata.items()
+    ])
+    st.dataframe(sens, hide_index=True)
+    _headon = strata["headon"]
+    st.warning(f"""The cuts disagree, and the disagreement carries information. In the two broad
 frontal cuts the female effect is small and not significant. In the strict head-on cut
 (`MAN_COLL=2`) it is **{pct(_headon.sex_effect)}
 ({'significant' if _headon.sex_is_significant else 'not significant'})**, and the seat effect
@@ -382,19 +509,21 @@ Depending on crash geometry the female effect sits somewhere between low single 
 double digits, and this window cannot pin it down further. Quoting only the head-on row, or
 only the core row, is cherry-picking.""")
 
-st.subheader(f"By vehicle model year (naive, FARS {FULL})")
-st.dataframe(load_bands(DB_PATH, span).rename(columns={
-    "mod_year_band": "vehicle model years", "f_only": "she died, he survived",
-    "m_only": "he died, she survived", "n_pairs": "mixed-sex pairs", "rr": "pooled RR",
-    "ci_lo": "CI low", "ci_hi": "CI high",
-}), hide_index=True)
-st.caption("These bands use the pooled (seat-confounded) ratio and are unadjusted for occupant "
-           "age. They feed the age-adjusted trend section below and make no trend claim on "
-           "their own. With women averaging ~1.4 years younger within pairs, the naive rows "
-           "UNDERSTATE the female OR relative to the age-adjusted ones.")
+st.subheader("Does the gap shrink as cars get newer?")
+condlogit_bands = load_condlogit_bands(DB_PATH, FULL, span)
+st.markdown(f"The published trend says yes. This data (FARS {FULL}) confirms the drop from "
+            f"pre-2000 vehicles to 2000s vehicles under every specification. After the 2000s "
+            f"nothing declines further, and whether the newest band sits above the 2000s "
+            f"level depends on a modelling choice.")
+_tchart = trend_chart(condlogit_bands)
+if _tchart is not None:
+    st.altair_chart(_tchart, width="stretch")
+    st.caption(f"Age-adjusted female odds ratio by vehicle model year, with 95% CI "
+               f"(FARS {FULL}, default specification). Vehicle model years, not calendar "
+               f"years. Gray marks sit below the {POWER_FLOOR}-discordant-pair power floor.")
 
-st.subheader(f"The trend question, age-adjusted (v1, FARS {FULL})")
-st.markdown(f"""
+with st.expander("Trend details, specification checks and the naive bands"):
+    st.markdown(f"""
 The direct test of the published shrinking trend (Atwood, Noh & Craig 2023: a 19.9% female
 penalty in the oldest vehicles falling to 5.8% in the newest): a within-vehicle differenced
 conditional logit over the full {FULL} span that holds seat position and occupant age constant
@@ -421,74 +550,64 @@ and a continued decline into the newest vehicles is not found. That may reflect 
 2020–2024 calendar years this window adds beyond the published study's 2019 endpoint, a period
 whose crash mix shifted sharply, or a genuine plateau. This design cannot separate those.
 """)
-condlogit_bands = load_condlogit_bands(DB_PATH, FULL, span)
 
+    def _grey_low_power(row: pd.Series) -> list[str]:
+        if row["headline safe"] == "low power":
+            return ["color: #888888; background-color: rgba(128,128,128,0.12)"] * len(row)
+        return [""] * len(row)
 
-def _grey_low_power(row: pd.Series) -> list[str]:
-    if row["headline safe"] == "low power":
-        return ["color: #888888; background-color: rgba(128,128,128,0.12)"] * len(row)
-    return [""] * len(row)
+    band_display = condlogit_bands.rename(columns={
+        "mod_year_band": "vehicle model years", "rr": "naive RR (unadjusted, pooled)",
+        "ci_lo": "naive CI low", "ci_hi": "naive CI high",
+        "adj_point": "age-adjusted female OR", "adj_ci_lo": "adjusted CI low",
+        "adj_ci_hi": "adjusted CI high", "n_discordant_pairs": "discordant pairs",
+    })
 
+    # Reuse the headline_safe column load_condlogit_bands already computed from
+    # POWER_FLOOR, rather than re-deriving the same rule here with a second
+    # literal threshold that could drift out of sync with it.
+    band_display["headline safe"] = band_display["headline_safe"].map(
+        lambda ok: "ok" if ok else "low power")
+    cols = ["vehicle model years", "naive RR (unadjusted, pooled)", "naive CI low",
+            "naive CI high", "age-adjusted female OR", "adjusted CI low", "adjusted CI high",
+            "discordant pairs", "headline safe"]
+    st.dataframe(band_display[cols].style.apply(_grey_low_power, axis=1), hide_index=True)
+    st.caption(f"Rows flagged **low power** carry fewer than the {POWER_FLOOR}-discordant-pair "
+               "floor this project requires before headlining a point estimate (design doc "
+               "section 5). They stay in the table, greyed out, and never carry the same "
+               "weight as an adequately powered band. Read them as directional only. The "
+               "naive columns use the pooled (seat-confounded) ratio, unadjusted for occupant "
+               "age; with women averaging ~1.4 years younger within pairs, they UNDERSTATE "
+               "the female OR relative to the age-adjusted ones.")
 
-band_display = condlogit_bands.rename(columns={
-    "mod_year_band": "vehicle model years", "rr": "naive RR (unadjusted, pooled)",
-    "ci_lo": "naive CI low", "ci_hi": "naive CI high",
-    "adj_point": "age-adjusted female OR", "adj_ci_lo": "adjusted CI low",
-    "adj_ci_hi": "adjusted CI high", "n_discordant_pairs": "discordant pairs",
-})
+    specs = load_band_specs(DB_PATH, FULL)
+    if not specs.empty:
+        st.markdown("**Specification check**: the same age-adjusted per-band female OR under "
+                    "the three specifications. A band-level claim that does not hold in all "
+                    "three columns depends on a modelling assumption rather than on the data:")
+        st.dataframe(specs.rename(columns={"mod_year_band": "vehicle model years"}),
+                     hide_index=True)
+        st.caption(f"*Separate nuisance* refits seat/age independently inside each band "
+                   f"instead of pooling them (the data reject pooling: the per-band seat "
+                   f"effect has disjoint CIs). *Vehicle age ≤ {VEHICLE_AGE_MAX}* restricts "
+                   f"every band to its first {VEHICLE_AGE_MAX} years on the road, putting "
+                   f"bands on comparable vehicle-age support, at the price that band and "
+                   f"calendar period become nearly synonymous, as in the published FARS trend "
+                   f"estimates.")
 
-# Reuse the headline_safe column load_condlogit_bands already computed from
-# POWER_FLOOR, rather than re-deriving the same rule here with a second
-# literal threshold that could drift out of sync with it.
-band_display["headline safe"] = band_display["headline_safe"].map(
-    lambda ok: "ok" if ok else "low power")
-cols = ["vehicle model years", "naive RR (unadjusted, pooled)", "naive CI low", "naive CI high",
-        "age-adjusted female OR", "adjusted CI low", "adjusted CI high", "discordant pairs",
-        "headline safe"]
-st.dataframe(band_display[cols].style.apply(_grey_low_power, axis=1), hide_index=True)
-st.caption(f"Rows flagged **low power** carry fewer than the {POWER_FLOOR}-discordant-pair floor "
-           "this project requires before headlining a point estimate (design doc section 5). "
-           "They stay in the table, greyed out, and never carry the same weight as an "
-           "adequately powered band. Read them as directional only.")
+    trend = load_condlogit_trend(DB_PATH, FULL)
+    if trend is not None and pd.notna(trend.point):
+        st.caption(f"Continuous-trend cross-check (fit separately from the band dummies, "
+                   f"never jointly, since band is a coarsened function of year): "
+                   f"**{trend.point:+.4f}** log-odds per decade (95% CI {trend.ci_lo:+.4f} "
+                   f"to {trend.ci_hi:+.4f}). Its sign should agree with the discrete "
+                   f"per-band pattern above; do not quote it as a third headline number.")
 
-specs = load_band_specs(DB_PATH, FULL)
-if not specs.empty:
-    st.markdown("**Specification check**: the same age-adjusted per-band female OR under the "
-                "three specifications. A band-level claim that does not hold in all three "
-                "columns depends on a modelling assumption rather than on the data:")
-    st.dataframe(specs.rename(columns={"mod_year_band": "vehicle model years"}),
-                 hide_index=True)
-    st.caption(f"*Separate nuisance* refits seat/age independently inside each band instead of "
-               f"pooling them (the data reject pooling: the per-band seat effect has disjoint "
-               f"CIs). *Vehicle age ≤ {VEHICLE_AGE_MAX}* restricts every band to its first "
-               f"{VEHICLE_AGE_MAX} years on the road, putting bands on comparable vehicle-age "
-               f"support, at the price that band and calendar period become nearly synonymous, "
-               f"as in the published FARS trend estimates.")
-
-trend = load_condlogit_trend(DB_PATH, FULL)
-if trend is not None and pd.notna(trend.point):
-    st.caption(f"Continuous-trend cross-check (fit separately from the band dummies, never "
-               f"jointly, since band is a coarsened function of year): **{trend.point:+.4f}** "
-               f"log-odds per decade (95% CI {trend.ci_lo:+.4f} to {trend.ci_hi:+.4f}). Its "
-               f"sign should agree with the discrete per-band pattern above; do not quote it "
-               f"as a third headline number.")
-
-st.subheader(f"Same-sex seat baseline and the seat × sex interaction (v1, FARS {FULL})")
-st.markdown("""
-A `female × seat` term cannot be recovered from mixed-sex pairs at all: within any discordant
-mixed-sex pair her indicator minus his is identically 1, so that term is algebraically the seat
-main effect (design doc section 6). This channel routes around that. The
-right-front-passenger-vs-driver fatality odds are computed separately within male-male and
-female-female discordant pairs and shown side by side, so the interaction ratio beneath can be
-read against its baselines.
-
-The raw baselines are age-confounded and serve as diagnostics only. The two cohorts differ
-sharply in who sits where at what age: female-female pairs carry a much older right-front
-passenger far more often than male-male pairs do, and age is the strongest single predictor of
-who dies, ahead of seat and sex. The headline numbers here are therefore the age-adjusted fits
-(quadratic within-pair age difference, same machinery as the mixed-sex model). The raw ORs sit
-beneath them so the size of the age correction stays visible.
-""")
+st.subheader("Is the passenger seat worse for women specifically?")
+st.markdown(f"Mixed-sex pairs cannot answer this, so male-male and female-female pairs are "
+            f"compared instead (FARS {FULL}). Age-adjusted, the passenger seat penalizes "
+            f"female-female pairs where it spares male-male ones. The size depends on the age "
+            f"model.")
 samesex = load_samesex_interaction(DB_PATH, FULL)
 male_seat, female_seat = samesex["male"], samesex["female"]
 male_adj, female_adj = samesex["male_ageadj"], samesex["female_ageadj"]
@@ -543,29 +662,48 @@ if male_ok and female_ok and interaction_ok:
                         delta=f"95% CI {interaction_cmp.ci_lo:+.3f} to "
                               f"{interaction_cmp.ci_hi:+.3f}",
                         delta_color="off")
-    if raw_ok:
-        st.caption(f"Unadjusted diagnostics: male-male {male_seat.point:.3f}× "
-                   f"[{male_seat.ci_lo:.3f}, {male_seat.ci_hi:.3f}], female-female "
-                   f"{female_seat.point:.3f}× [{female_seat.ci_lo:.3f}, {female_seat.ci_hi:.3f}], "
-                   f"raw log-ratio {interaction.point:+.3f} [{interaction.ci_lo:+.3f}, "
-                   f"{interaction.ci_hi:+.3f}]. The gap between the raw and age-adjusted rows IS "
-                   f"the age-composition confound. Do not quote the raw asymmetry as a seat or "
-                   f"sex effect.")
-    st.caption("How to read the pair of interaction numbers above: on the full window the "
-               "age-adjusted interaction is positive, statistically significant, and stable in "
-               "direction across calendar eras. The passenger seat penalizes female-female "
-               "pairs where it spares male-male ones. Its *size* depends on the age model, "
-               "though: restricted to age-comparable pairs (where the quadratic adjustment "
-               "interpolates instead of extrapolating) the estimate drops to roughly half and "
-               "its CI touches zero. What this supports is a female-specific right-front "
-               "penalty of modest size, with the magnitude uncertain between roughly +10% and "
-               "+23%, carried disproportionately by large-age-gap pairs.")
-    st.caption("All of it rests on a weaker identifying assumption than every other number on "
-               "this page: same-sex pairs are not sex-paired within the same crash, so who "
-               "rides with whom could correlate with crash severity or vehicle type in ways the "
-               "mixed-pair design structurally rules out. This channel is also the most "
-               "power-starved on the page, because two-occupant fatal crashes skew heavily "
-               "mixed-sex.")
+    st.caption("Read the two interaction numbers together: the full-cohort estimate is "
+               "significant, the age-comparable one is roughly half with a CI touching zero.")
+    with st.expander("Baselines, raw diagnostics and the identifying assumption"):
+        st.markdown("""
+A `female × seat` term cannot be recovered from mixed-sex pairs at all: within any discordant
+mixed-sex pair her indicator minus his is identically 1, so that term is algebraically the seat
+main effect (design doc section 6). This channel routes around that. The
+right-front-passenger-vs-driver fatality odds are computed separately within male-male and
+female-female discordant pairs and shown side by side, so the interaction ratio can be read
+against its baselines.
+
+The raw baselines are age-confounded and serve as diagnostics only. The two cohorts differ
+sharply in who sits where at what age: female-female pairs carry a much older right-front
+passenger far more often than male-male pairs do, and age is the strongest single predictor of
+who dies, ahead of seat and sex. The headline numbers are therefore the age-adjusted fits
+(quadratic within-pair age difference, same machinery as the mixed-sex model). The raw ORs sit
+below so the size of the age correction stays visible.
+""")
+        if raw_ok:
+            st.caption(f"Unadjusted diagnostics: male-male {male_seat.point:.3f}× "
+                       f"[{male_seat.ci_lo:.3f}, {male_seat.ci_hi:.3f}], female-female "
+                       f"{female_seat.point:.3f}× [{female_seat.ci_lo:.3f}, "
+                       f"{female_seat.ci_hi:.3f}], raw log-ratio {interaction.point:+.3f} "
+                       f"[{interaction.ci_lo:+.3f}, {interaction.ci_hi:+.3f}]. The gap between "
+                       f"the raw and age-adjusted rows IS the age-composition confound. Do not "
+                       f"quote the raw asymmetry as a seat or sex effect.")
+        st.caption("How to read the pair of interaction numbers: on the full window the "
+                   "age-adjusted interaction is positive, statistically significant, and "
+                   "stable in direction across calendar eras. The passenger seat penalizes "
+                   "female-female pairs where it spares male-male ones. Its *size* depends on "
+                   "the age model, though: restricted to age-comparable pairs (where the "
+                   "quadratic adjustment interpolates instead of extrapolating) the estimate "
+                   "drops to roughly half and its CI touches zero. What this supports is a "
+                   "female-specific right-front penalty of modest size, with the magnitude "
+                   "uncertain between roughly +10% and +23%, carried disproportionately by "
+                   "large-age-gap pairs.")
+        st.caption("All of it rests on a weaker identifying assumption than every other number "
+                   "on this page: same-sex pairs are not sex-paired within the same crash, so "
+                   "who rides with whom could correlate with crash severity or vehicle type in "
+                   "ways the mixed-pair design structurally rules out. This channel is also "
+                   "the most power-starved on the page, because two-occupant fatal crashes "
+                   "skew heavily mixed-sex.")
 else:
     st.info(f"Same-sex interaction estimand not available, or below the {POWER_FLOOR}-discordant-"
             f"pair power floor, in this run.")
@@ -576,9 +714,20 @@ if not sev.empty:
         if (sev.estimand.str.startswith("ciss_")).any() else None
     nass_years = sev[sev.estimand.str.startswith("nass_")]["fars_years"].iloc[0] \
         if (sev.estimand.str.startswith("nass_")).any() else None
-    st.subheader("The severity-adjusted gap (v2, CISS "
-                 f"{ciss_years or '—'} + NASS-CDS {nass_years or '—'})")
-    st.markdown("""
+    st.subheader("The severity-adjusted gap")
+    st.markdown(f"FARS only knows who died. CISS ({ciss_years or '—'}) and NASS-CDS "
+                f"({nass_years or '—'}) grade injuries and reconstruct crash forces, which is "
+                f"where the published numbers live. The delta-V-adjusted estimates here land "
+                f"in the published band without tuning.")
+    _schart = severity_chart(sev)
+    if _schart is not None:
+        st.altair_chart(_schart, width="stretch")
+        st.caption("Female odds ratio for a moderate-or-worse (MAIS 2+) and serious-or-worse "
+                   "(MAIS 3+) injury, belted front-outboard adults in frontal light-vehicle "
+                   "crashes, delta-V-adjusted, with 95% CI. Faded marks sit below the power "
+                   "floor.")
+    sev_expander = st.expander("The benchmark table, weight diagnostics and AIS sensitivity")
+    sev_expander.markdown("""
 FARS knows who died and nothing more, so everything above is a *fatality* contrast within fatal
 crashes. This rung switches data sets: CISS and its predecessor NASS-CDS are weighted national
 samples of tow-away crashes with hospital-grade AIS injury coding and reconstructed delta-V.
@@ -610,7 +759,7 @@ remains net of body size; it does not test whether the gap is real.
             "weights trimmed (p95)": _sev_fmt(_sev_row(sev, prefix + "base_wtrim95")),
             "published benchmark": published,
         })
-    st.dataframe(pd.DataFrame(bench), hide_index=True)
+    sev_expander.dataframe(pd.DataFrame(bench), hide_index=True)
 
     ciss_base = _sev_row(sev, "ciss_svylogit_female_or_mais2plus_frontal_base")
     nass_base = _sev_row(sev, "nass_svylogit_female_or_mais3plus_frontal_base")
@@ -624,25 +773,27 @@ remains net of body size; it does not test whether the gap is real.
                 f"design df={int(row.df)}, Kish effective n={row.kish_neff:,.0f}, "
                 f"max/median weight={row.weight_max_over_median:.0f}×")
     if diag_bits:
-        st.caption("**Weight diagnostics** (this makes the Viano 2025 weight-instability "
-                   "critique measurable): " + "; ".join(diag_bits) + ". A max/median weight "
-                   "ratio in the tens or hundreds means single cases can move a point "
-                   "estimate, which is why the trimmed-weights column and the design-df CIs "
-                   "ship next to every number.")
+        sev_expander.caption("**Weight diagnostics** (this makes the Viano 2025 "
+                             "weight-instability critique measurable): "
+                             + "; ".join(diag_bits) + ". A max/median weight ratio in the "
+                             "tens or hundreds means single cases can move a point estimate, "
+                             "which is why the trimmed-weights column and the design-df CIs "
+                             "ship next to every number.")
     if ais08 is not None and pd.notna(ais08.point):
         pair = (f"the SAME {ais08.fars_years} dual-coded cohort grades "
                 f"{_sev_fmt(ais90dual)} under AIS90 and {_sev_fmt(ais08)} under AIS2008"
                 if ais90dual is not None and pd.notna(ais90dual.point)
                 else f"the {ais08.fars_years} dual-coded cohort grades {_sev_fmt(ais08)} "
                      f"under AIS2008")
-        st.caption(f"**AIS revision sensitivity**: NASS 2010+ dual-codes injuries in AIS90 and "
-                   f"AIS2008, and for MAIS 3+ {pair}. That is a same-cohort pair, so the "
-                   f"difference is the injury *coding* itself rather than an era or cohort "
-                   f"shift (comparing either against the full-window base row would conflate "
-                   f"the two). The revision boundary sits between the NASS-era and CISS-era "
-                   f"benchmarks, so part of any Bose-vs-Craig gap comes from coding rather "
-                   f"than crash physics.")
-    st.markdown("""
+        sev_expander.caption(f"**AIS revision sensitivity**: NASS 2010+ dual-codes injuries "
+                             f"in AIS90 and AIS2008, and for MAIS 3+ {pair}. That is a "
+                             f"same-cohort pair, so the difference is the injury *coding* "
+                             f"itself rather than an era or cohort shift (comparing either "
+                             f"against the full-window base row would conflate the two). The "
+                             f"revision boundary sits between the NASS-era and CISS-era "
+                             f"benchmarks, so part of any Bose-vs-Craig gap comes from coding "
+                             f"rather than crash physics.")
+    sev_expander.markdown("""
 The delta-V-adjusted rows land where the literature lands: women's frontal crashes carry lower
 delta-V on average, so the base tier *understates* the conditional injury odds and the +ΔV tier
 raises every estimate, the same direction every published severity analysis reports. The gap
@@ -671,8 +822,8 @@ Read the severity numbers with these in hand:
   fatal crashes), different data, different design.
 """)
 
-st.subheader("Read this before quoting anything here")
-st.markdown("""
+caveats = st.expander("Read this before quoting anything here")
+caveats.markdown("""
 - **These are within-crash relative risks given a fatal frontal crash, never population
   rates.** FARS records fatal crashes only; every crash here already killed someone.
 - **Not severity-adjusted beyond what the shared vehicle controls.** Same vehicle, same impact,
@@ -690,9 +841,9 @@ st.markdown("""
   cohort (see `codebook.py`), but the *wide* frontal variant selects a somewhat narrower crash
   set after 2010, so cross-era comparisons of that one variant carry an asterisk.
 """)
-
-st.subheader("v1 model caveats: read these next to the age-adjusted and interaction numbers")
-st.markdown("""
+caveats.markdown("**v1 model caveats**, to read next to the age-adjusted and interaction "
+                 "numbers:")
+caveats.markdown("""
 - **Not a verified reproduction of any published regression form.** This is a standard matched-pairs
   differenced-logit (the conditional-likelihood identity is textbook), built to answer the trend and
   interaction questions on this data. It has not been checked against the exact model-year-band
@@ -729,8 +880,8 @@ st.markdown("""
   directional only.
 """.format(piecewise_agreement=piecewise_agreement_text(condlogit_bands, FULL)))
 
-st.subheader("Method")
-st.markdown(f"""
+method = st.expander("Method, windows and the conditional logit")
+method.markdown(f"""
 Evans double-pair design: only vehicles carrying **exactly one eligible male and one eligible
 female** (both belted, front outboard, age 16–96, light vehicle) enter, which holds crash severity,
 delta-V, vehicle and impact direction physically constant within the vehicle. The estimate is the

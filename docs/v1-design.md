@@ -314,8 +314,11 @@ dashboard-facing filtering function actually enforces the floor, not just that i
   (`fars_samesex_seatsex_interaction_*`) and its CI directly beneath — following the repo's
   existing "never show the confounded number alone" convention, extended here to "never show the
   interaction ratio without its same-sex baselines."
-- Caveat block (visible `st.error`/`st.warning`/`st.markdown` in the page body, per existing
-  convention — not tucked into tooltips or expanders) gains, in addition to v0's existing text:
+- Caveat block gains, in addition to v0's existing text (amended 2026-09-01: the full caveat
+  text lives in an always-present expander in the page body, one click away, never in a
+  tooltip; the identifying-assumption, null-result and power-floor points additionally appear
+  in visible text or chart captions next to their numbers, so the "next to the number" rules
+  in §3 and §6 still hold above the fold):
   - the epistemic caveat that this model is not verified against any specific published equation
     form (§2);
   - the pooled-nuisance-across-bands assumption and a link to where the per-band-independent

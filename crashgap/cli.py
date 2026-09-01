@@ -3,6 +3,8 @@
   crashgap ingest --years 2000-2024     download + load FARS into SQLite
   crashgap analyze --years 2000-2024    double-pair estimates -> results table
   crashgap analyze-v1 --years 2000-2024 conditional-logit estimates -> results table
+  crashgap ingest-severity              download + load CISS 2017+ and NASS-CDS 2000-2015
+  crashgap analyze-v2                   design-weighted severity estimates -> results table
   crashgap dashboard                    start the Streamlit dashboard
 
 The dashboard reads two windows - the modern decade for the headline and the
@@ -52,6 +54,18 @@ def main(argv: list[str] | None = None) -> int:
     p_analyze_v1.add_argument("--reps", type=int, default=2000,
                               help="same-sex channel bootstrap replicates (default 2000)")
 
+    p_sev = sub.add_parser("ingest-severity",
+                           help="download + load CISS and NASS-CDS into sev_occupant")
+    p_sev.add_argument("--ciss-years", default="2017-2024",
+                       help="e.g. 2017-2024, or 'none'")
+    p_sev.add_argument("--nass-years", default="2000-2015",
+                       help="e.g. 2000-2015, or 'none'")
+    p_sev.add_argument("--data-dir", default=DEFAULT_RAW,
+                       help=f"where raw files are cached (default {DEFAULT_RAW})")
+
+    sub.add_parser("analyze-v2",
+                   help="run the design-weighted severity estimates (CISS + NASS-CDS)")
+
     sub.add_parser("dashboard", help="start the Streamlit dashboard")
 
     args = parser.parse_args(argv)
@@ -97,6 +111,19 @@ def main(argv: list[str] | None = None) -> int:
         run_ts = analyze_v1(conn, span, reps=args.reps)
         n = conn.execute("SELECT COUNT(*) FROM results WHERE run_ts = ?", (run_ts,)).fetchone()[0]
         print(f"wrote {n} fars_condlogit_*/fars_samesex_* rows under run_ts={run_ts}")
+    elif args.command == "ingest-severity":
+        from .ingest_severity import ingest_ciss, ingest_nass
+        conn = connect(args.db)
+        if args.ciss_years != "none":
+            ingest_ciss(conn, parse_years(args.ciss_years), args.data_dir)
+        if args.nass_years != "none":
+            ingest_nass(conn, parse_years(args.nass_years), args.data_dir)
+    elif args.command == "analyze-v2":
+        from .severity import analyze_v2
+        conn = connect(args.db)
+        run_ts = analyze_v2(conn)
+        n = conn.execute("SELECT COUNT(*) FROM results WHERE run_ts = ?", (run_ts,)).fetchone()[0]
+        print(f"wrote {n} ciss_svylogit_*/nass_svylogit_* rows under run_ts={run_ts}")
     elif args.command == "dashboard":
         app = Path(__file__).resolve().parent.parent / "dashboard" / "app.py"
         os.environ["CRASHGAP_DB"] = args.db

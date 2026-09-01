@@ -202,6 +202,51 @@ applies in full on top of all this — same-sex pairs aren't sex-paired within t
 who rides with whom could correlate with severity or vehicle type in ways the mixed-pair design
 rules out by construction.
 
+## v2: the severity rung — CISS and NASS-CDS
+
+Everything above is a *fatality* contrast inside fatal crashes, because that is all FARS can
+carry. The published numbers the crash-test-dummy debate actually cites — Bose 2011's MAIS 3+
+odds ratio 1.47, Craig 2024's MAIS 2+ ~1.75 — are **severity-adjusted injury odds**, measured on
+crash-investigation samples with hospital-grade AIS injury grading, reconstructed delta-V and
+survey weights. v2 ingests both of those sources (CISS 2017–2024 CSV releases and NASS-CDS
+2000–2015 SAS files) into a dedicated `sev_occupant` table and fits the survey-convention model:
+a design-weighted logistic pseudo-MLE with Taylor-linearized variance (strata = `PSUSTRAT`,
+clusters = `PSU`, weights = `CASEWGT`/`RATWGT`) and t-based CIs on the design's own degrees of
+freedom — with ~32 PSUs in 12 strata that df is ~20, so honest intervals are visibly wider than
+naive ones. Estimand family: `{ciss,nass}_svylogit_female_or_{mais2plus,mais3plus}_frontal_*`.
+
+Cohort: belted front-outboard adults (16–96) with known sex and graded MAIS in frontal
+light-vehicle tow-away crashes — frontal meaning the primary damage event has plane F at 11–1
+o'clock (`ve` GAD1/DOF1 for NASS, the CDC file's ranked events for CISS), symmetric with the
+FARS core zone. Three covariate tiers per outcome: `base` (age, seat, model-year band), `dv`
+(adds ΔV and ΔV², on the reconstruction-succeeded subset), `dvanthro` (adds height and BMI —
+the "is it just body size" tier; height/BMI partly *mediate* a sex effect, so it answers "net of
+body size", never "is the gap real"). Sensitivities: `_wtrim95` caps weights at the cohort's
+95th percentile (the Viano 2025 weight-instability critique, made measurable — every row's
+`cohort_def` carries the Kish effective n and the max/median weight ratio), and `_ais08` refits
+NASS on its dual-coded AIS2008 grading, sizing the revision boundary that sits between the
+Bose-era and Craig-era benchmarks. The power floor here is 30 unweighted outcome events.
+
+**Where the first canonical run landed (CISS 52,943 + NASS-CDS 150,897 ingested occupants;
+frontal cohorts 13,145 / 28,220):** the delta-V-adjusted estimates sit where the literature
+sits — NASS MAIS 3+ `dv` = **1.50 [1.10–2.04]** against Bose's published 1.47, CISS MAIS 2+
+`dv` = **1.91 [1.23–2.96]** against Craig's ~1.75 — and the base tiers sit below them, because
+women's frontal crashes carry lower delta-V on average, the same direction every published
+severity analysis reports. The body-size tier does not absorb the effect (NASS MAIS 3+
+unchanged at 1.51; both MAIS 2+ cells rise; only the underpowered CISS MAIS 3+ cell falls, and
+it is not significant in either tier). The measured fragilities ship next to those numbers:
+single cases carry weights up to ~500× the median (Kish effective n ~10% of nominal; the
+`_wtrim95` refit moves NASS MAIS 2+ from 1.72 to 1.45 without changing its significance), and
+the AIS revision alone moves NASS MAIS 3+ from 1.21 [0.93–1.57] (AIS90) to 0.93 [0.60–1.43]
+(AIS2008, dual-coded 2010-2015 subset) — so part of any Bose-vs-Craig gap is injury *coding*,
+not crash physics.
+
+What v2 deliberately does not do: pool CISS with NASS (different designs, eras, AIS revisions),
+pool either with FARS (different estimand entirely), claim a reproduction of Bose or Craig
+(frontal definitions, cohorts and covariate sets differ in documented ways — the dashboard shows
+the published numbers as orientation, with the differences beside them), or grade its own
+homework on causality. Design and every deviation from the original v2 plan: `docs/v2-design.md`.
+
 ## Usage
 
 ```bash
@@ -236,9 +281,10 @@ families); point a monthly cron at it and the numbers update themselves when NHT
   Where that landed: the decline into the 2000s is identified, a continued decline is not found,
   and the adjusted interaction is significant and era-stable but age-model-dependent in size — see
   the honest reads above.
-- **v2** (in progress) — CISS/NASS-CDS with MAIS injury grading and survey weights: the rung that
-  reaches the severity-adjusted odds ratios the literature reports (Bose 2011 MAIS 3+ OR 1.47;
-  Craig 2024 MAIS 2+ OR ~1.75).
+- **v2** (this release) — CISS/NASS-CDS with MAIS injury grading and survey weights: the rung
+  that reaches the severity-adjusted odds ratios the literature reports. See the v2 section
+  above for where the first run landed; `crashgap ingest-severity` + `crashgap analyze-v2` are
+  the commands, and the monthly refresh keeps CISS current as new years publish.
 
 ## Data
 

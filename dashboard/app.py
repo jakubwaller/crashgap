@@ -222,6 +222,49 @@ def load_samesex_interaction(db_path: str, fars_years: str,
     return out
 
 
+@st.cache_data(ttl=3600)
+def load_severity(db_path: str) -> pd.DataFrame:
+    """Latest analyze_v2 run: every {ciss,nass}_svylogit_* row, with the
+    cohort_def JSON parsed into columns the section below reads. v2 rows
+    carry their own source year spans in fars_years, so they never collide
+    with the FARS window loads above."""
+    if not Path(db_path).exists():
+        return pd.DataFrame()
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = pd.read_sql_query(
+            "SELECT * FROM results WHERE estimand LIKE '%_svylogit_%' "
+            "AND run_ts = (SELECT MAX(run_ts) FROM results "
+            "WHERE estimand LIKE '%_svylogit_%')", conn)
+    finally:
+        conn.close()
+    if rows.empty:
+        return rows
+    info = rows["cohort_def"].apply(json.loads)
+    for key in ("n_events", "df", "kish_neff", "weight_max_over_median",
+                "n_obs", "share_dv_known", "ais_revision"):
+        rows[key] = info.apply(lambda d, k=key: d.get(k))
+    return rows
+
+
+def _sev_row(sev: pd.DataFrame, estimand: str) -> pd.Series | None:
+    hits = sev[sev.estimand == estimand]
+    return hits.iloc[0] if not hits.empty else None
+
+
+def _sev_ok(row: pd.Series | None, floor: int = 30) -> bool:
+    """v2's power floor: unweighted positive-outcome count and at least one
+    design df; mirrors _row_headline_safe for the pair channels."""
+    return (row is not None and pd.notna(row.point)
+            and (row.n_events or 0) >= floor and (row.df or 0) >= 1)
+
+
+def _sev_fmt(row: pd.Series | None) -> str:
+    if row is None or pd.isna(row.point):
+        return "—"
+    return f"{row.point:.2f} [{row.ci_lo:.2f}, {row.ci_hi:.2f}]"
+
+
 def piecewise_agreement_text(condlogit_bands: pd.DataFrame, fars_years: str) -> str:
     """Compares the quadratic default per-band female OR against the
     `_agepiecewise` sensitivity variant and states, in one sentence, whether
@@ -515,6 +558,98 @@ if male_ok and female_ok and interaction_ok:
 else:
     st.info(f"Same-sex interaction estimand not available, or below the {POWER_FLOOR}-discordant-"
             f"pair power floor, in this run.")
+
+sev = load_severity(DB_PATH)
+if not sev.empty:
+    ciss_years = sev[sev.estimand.str.startswith("ciss_")]["fars_years"].iloc[0] \
+        if (sev.estimand.str.startswith("ciss_")).any() else None
+    nass_years = sev[sev.estimand.str.startswith("nass_")]["fars_years"].iloc[0] \
+        if (sev.estimand.str.startswith("nass_")).any() else None
+    st.subheader("The severity-adjusted gap (v2, CISS "
+                 f"{ciss_years or '—'} + NASS-CDS {nass_years or '—'})")
+    st.markdown("""
+FARS knows who died; it has no injury grading, no delta-V and no sampling weights, so everything
+above is a *fatality* contrast within fatal crashes. This rung switches data sets: CISS and its
+predecessor NASS-CDS are weighted national samples of tow-away crashes with hospital-grade AIS
+injury coding and reconstructed delta-V. The estimand is the female odds ratio for **MAIS 2+**
+(the quantity in Craig 2024, published ~1.75) and **MAIS 3+** (Bose 2011, published ~1.47) among
+belted front-outboard adults in frontal light-vehicle crashes — a design-weighted logistic with
+Taylor-linearized, PSU-clustered, stratum-aware standard errors and t-based CIs on the design's
+own degrees of freedom (15–28 here, so intervals are honest rather than optimistic).
+
+Three covariate tiers per estimate: **base** (age, seat, model-year band), **+ΔV** (adds
+delta-V and its square, on the subset where reconstruction succeeded), **+ΔV+anthro** (adds
+height and BMI — the "is it just body size" check; height and BMI are partly *mediators* of a
+sex effect, so this tier answers "net of body size", not "is the gap real").
+""")
+    bench = []
+    for source, outcome, published in (
+            ("ciss", "mais2plus", "Craig 2024: ~1.75 (MAIS 2+, CISS era)"),
+            ("ciss", "mais3plus", "Bose 2011: 1.47 (MAIS 3+, NASS era)"),
+            ("nass", "mais2plus", "Craig 2024: ~1.75 (MAIS 2+, CISS era)"),
+            ("nass", "mais3plus", "Bose 2011: 1.47 (MAIS 3+, NASS era)")):
+        prefix = f"{source}_svylogit_female_or_{outcome}_frontal_"
+        base = _sev_row(sev, prefix + "base")
+        bench.append({
+            "source": f"{source.upper()} ({base.fars_years if base is not None else '—'})",
+            "outcome": {"mais2plus": "MAIS 2+", "mais3plus": "MAIS 3+"}[outcome],
+            "base OR [95% CI]": _sev_fmt(base),
+            "+ΔV": _sev_fmt(_sev_row(sev, prefix + "dv")),
+            "+ΔV +height/BMI": _sev_fmt(_sev_row(sev, prefix + "dvanthro")),
+            "weights trimmed (p95)": _sev_fmt(_sev_row(sev, prefix + "base_wtrim95")),
+            "published benchmark": published,
+        })
+    st.dataframe(pd.DataFrame(bench), hide_index=True)
+
+    ciss_base = _sev_row(sev, "ciss_svylogit_female_or_mais2plus_frontal_base")
+    nass_base = _sev_row(sev, "nass_svylogit_female_or_mais3plus_frontal_base")
+    ais08 = _sev_row(sev, "nass_svylogit_female_or_mais3plus_frontal_base_ais08")
+    diag_bits = []
+    for label, row in (("CISS", ciss_base), ("NASS", nass_base)):
+        if row is not None and pd.notna(row.point):
+            diag_bits.append(
+                f"{label}: n={int(row.n_obs):,}, events={int(row.n_events):,}, "
+                f"design df={int(row.df)}, Kish effective n={row.kish_neff:,.0f}, "
+                f"max/median weight={row.weight_max_over_median:.0f}×")
+    if diag_bits:
+        st.caption("**Weight diagnostics** (the Viano 2025 critique made measurable): "
+                   + "; ".join(diag_bits) + ". A max/median weight ratio in the tens or "
+                   "hundreds means single cases can move a point estimate — which is why the "
+                   "trimmed-weights column and the design-df CIs ship next to every number.")
+    if ais08 is not None and pd.notna(ais08.point):
+        st.caption(f"**AIS revision sensitivity**: NASS 2010+ dual-codes injuries in AIS90 and "
+                   f"AIS2008; the MAIS 3+ base OR refit on AIS2008 grading is "
+                   f"{_sev_fmt(ais08)}. The revision boundary sits between the NASS-era and "
+                   f"CISS-era benchmarks, so part of any Bose-vs-Craig gap is coding, not crash "
+                   f"physics.")
+    st.markdown("""
+**The honest read of this table.** The delta-V-adjusted rows land where the literature lands:
+women's frontal crashes carry lower delta-V on average, so the base tier *understates* the
+conditional injury odds and the +ΔV tier raises every estimate — the same direction every
+published severity analysis reports. The gap does **not** evaporate under the body-size tier:
+adding height and BMI leaves the NASS MAIS 3+ estimate unchanged, raises both MAIS 2+
+estimates, and moves only the CISS MAIS 3+ cell downward — the one cell that is not
+statistically significant in *either* tier — so "smaller occupants get hurt more" does not
+absorb the female coefficient here. Against that stand the two measured fragilities: single cases carry weights
+hundreds of times the median (trimming moves points visibly, though not their direction), and
+the AIS revision alone moves the NASS MAIS 3+ estimate materially on the dual-coded subset. The
+defensible summary is that the severity-adjusted female odds ratio in frontal crashes sits
+**roughly in the 1.4–2.0 band the published literature reports, with the delta-V-adjusted
+estimates at its upper half and every fragility this project could measure printed beside it**.
+
+**Read the severity numbers with these in hand:**
+
+- **Complete-case cohorts.** Occupants without a completed injury workup (a large share of NASS
+  occupant rows) drop out, as in every published analysis of these files — stated, not hidden.
+- **Delta-V missingness is selective.** Reconstruction fails more often in the worst crashes;
+  the +ΔV tiers run on the subset where it succeeded (share recorded in each row's cohort
+  definition), and the base-vs-ΔV comparison is partly a cohort change, not only an adjustment.
+- **This is not a reproduction of Bose or Craig.** Frontal definitions, cohorts, AIS revisions
+  and covariate sets differ in documented ways (docs/v2-design.md); the benchmark column is for
+  orientation, not replication.
+- **Never pooled with FARS.** Different estimand (injury odds in tow-away crashes vs death in
+  fatal crashes), different data, different design.
+""")
 
 st.subheader("Read this before quoting anything here")
 st.markdown("""

@@ -1,8 +1,14 @@
-"""SQLite storage: FARS (and later CISS) side by side, keyed by (source, year).
+"""SQLite storage: FARS tables plus the v2 severity table, side by side.
 
-Nullable mais/weight stay NULL for FARS and get populated when the CISS rung
-lands, so v0 -> v2 needs no migration. Inserts are INSERT OR REPLACE on the
-natural key, which keeps re-ingests of the same year idempotent.
+Inserts are INSERT OR REPLACE on the natural key, which keeps re-ingests of
+the same year idempotent.
+
+The v0 plan reserved person.mais/person.weight for the CISS rung; v2
+superseded that with the dedicated sev_occupant table below (design doc
+docs/v2-design.md section 3): the severity sources are occupant-workup-grain
+with design metadata (PSU, stratum, survey weight, delta-V, BMI, dual AIS
+coding) that has no FARS analogue. The two nullable columns stay for schema
+stability and remain NULL.
 """
 
 from __future__ import annotations
@@ -37,6 +43,28 @@ CREATE TABLE IF NOT EXISTS person (
 );
 CREATE INDEX IF NOT EXISTS idx_person_key  ON person  (source, year, st_case, veh_no);
 CREATE INDEX IF NOT EXISTS idx_vehicle_key ON vehicle (source, year, st_case, veh_no);
+
+-- v2 severity rung: one denormalized analysis-grain row per occupant with
+-- injury workup, carrying its vehicle's fields (an occupant belongs to
+-- exactly one vehicle; the join happens once, at ingest). source is 'ciss'
+-- or 'nass'; the raw zips/sas7bdat files stay the source of truth.
+-- Sentinels are already NULLed at ingest; codes follow severity_codebook.py.
+CREATE TABLE IF NOT EXISTS sev_occupant (
+    source TEXT NOT NULL, year INTEGER NOT NULL,
+    psu INTEGER NOT NULL, psustrat INTEGER,
+    case_id TEXT NOT NULL, veh_no INTEGER NOT NULL, occ_no INTEGER NOT NULL,
+    weight REAL,            -- survey weight (CISS CASEWGT / NASS RATWGT)
+    sex_female INTEGER,     -- 1 female (incl. pregnancy codes), 0 male, NULL unknown
+    age REAL, seat_pos INTEGER,
+    belted INTEGER,         -- 1 belted {2,3,4}, 0 not, NULL unknown
+    height REAL, body_weight REAL, bmi REAL,
+    mais INTEGER,           -- source-contemporary AIS (NASS: AIS90, CISS: AIS2015)
+    mais08 INTEGER,         -- NASS 2010+ dual coding, else NULL
+    body_typ INTEGER, mod_year INTEGER,
+    dv_total REAL,          -- delta-V km/h, NULL unknown
+    is_frontal INTEGER,     -- primary damage event: plane F, clock 11/12/1
+    PRIMARY KEY (source, year, psu, case_id, veh_no, occ_no)
+);
 
 -- results: the live, versioned, queryable citation layer
 CREATE TABLE IF NOT EXISTS results (

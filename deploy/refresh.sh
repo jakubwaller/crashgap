@@ -28,3 +28,12 @@ for years in "$MODERN" "$FULL"; do
     python -m crashgap.cli analyze --years "$years"
     python -m crashgap.cli analyze-v1 --years "$years"
 done
+
+# v2 severity: CISS publishes one new year annually (NASS-CDS ended 2015 and
+# never changes); a not-yet-published year 404s harmlessly. Re-pull the two
+# newest CISS years in case the latest release was revised.
+for y in $((YEAR - 2)) $((YEAR - 1)); do
+    rm -f "data/raw/ciss/CISS_${y}_CSV_files.zip"
+done
+python -m crashgap.cli ingest-severity --ciss-years "2017-$((YEAR - 1))" --nass-years none
+python -m crashgap.cli analyze-v2

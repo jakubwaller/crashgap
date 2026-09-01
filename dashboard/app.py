@@ -316,9 +316,10 @@ def split_chart(core) -> alt.Chart:
         {"configuration": "she drives", "ratio": core.rr_she_drives,
          "pairs": core.n_pairs_she_drives},
     ])
+    xmax = max(1.3, float(df["ratio"].max()) * 1.15)
     bars = alt.Chart(df).mark_bar(color=BLUE, size=26, cornerRadiusEnd=4).encode(
         x=alt.X("ratio:Q", title="her deaths : his deaths",
-                scale=alt.Scale(domain=[0, 1.3])),
+                scale=alt.Scale(domain=[0, xmax])),
         y=alt.Y("configuration:N", title=None, sort=None),
         tooltip=[alt.Tooltip("configuration:N"),
                  alt.Tooltip("ratio:Q", format=".3f"),
@@ -366,13 +367,17 @@ def trend_chart(bands: pd.DataFrame) -> alt.Chart | None:
 
 def severity_chart(sev: pd.DataFrame) -> alt.Chart | None:
     """The delta-V-adjusted severity ORs with CIs, against the published
-    benchmarks (Craig 2024 for MAIS 2+, Bose 2011 for MAIS 3+) as gray
-    diamonds. Below-floor cells fade and say so in the tooltip."""
+    benchmarks as gray diamonds. A diamond appears only where the eras match
+    (Craig 2024 measured MAIS 2+ in CISS, Bose 2011 measured MAIS 3+ in
+    NASS-CDS); the other two cells have no like-for-like published number,
+    per docs/v2-design.md. Below-floor cells fade and say so in the
+    tooltip."""
     cells = {("ciss", "mais2plus"): "CISS · MAIS 2+",
              ("ciss", "mais3plus"): "CISS · MAIS 3+",
              ("nass", "mais2plus"): "NASS · MAIS 2+",
              ("nass", "mais3plus"): "NASS · MAIS 3+"}
-    benchmarks = {"mais2plus": ("Craig 2024", 1.75), "mais3plus": ("Bose 2011", 1.47)}
+    benchmarks = {("ciss", "mais2plus"): ("Craig 2024 (CISS era)", 1.75),
+                  ("nass", "mais3plus"): ("Bose 2011 (NASS era)", 1.47)}
     est_rows, bench_rows = [], []
     for (source, outcome), label in cells.items():
         r = _sev_row(sev, f"{source}_svylogit_female_or_{outcome}_frontal_dv")
@@ -381,8 +386,9 @@ def severity_chart(sev: pd.DataFrame) -> alt.Chart | None:
         est_rows.append({"cell": label, "point": r.point, "ci_lo": r.ci_lo,
                          "ci_hi": r.ci_hi,
                          "power": "ok" if _sev_ok(r) else "low power"})
-        name, val = benchmarks[outcome]
-        bench_rows.append({"cell": label, "point": val, "benchmark": name})
+        if (source, outcome) in benchmarks:
+            name, val = benchmarks[(source, outcome)]
+            bench_rows.append({"cell": label, "point": val, "benchmark": name})
     if not est_rows:
         return None
     order = [label for label in cells.values()
@@ -393,7 +399,8 @@ def severity_chart(sev: pd.DataFrame) -> alt.Chart | None:
                        range=["circle", "diamond"])
     est = pd.DataFrame(est_rows)
     est["series"] = "this analysis (ΔV-adjusted)"
-    bench = pd.DataFrame(bench_rows)
+    # explicit columns so an empty benchmark layer still compiles
+    bench = pd.DataFrame(bench_rows, columns=["cell", "point", "benchmark"])
     bench["series"] = "published benchmark"
     faded = alt.condition(alt.datum.power == "low power",
                           alt.value(0.45), alt.value(1.0))
@@ -557,7 +564,9 @@ whose crash mix shifted sharply, or a genuine plateau. This design cannot separa
         return [""] * len(row)
 
     band_display = condlogit_bands.rename(columns={
-        "mod_year_band": "vehicle model years", "rr": "naive RR (unadjusted, pooled)",
+        "mod_year_band": "vehicle model years", "n_pairs": "pairs",
+        "f_only": "she died, he didn't", "m_only": "he died, she didn't",
+        "rr": "naive RR (unadjusted, pooled)",
         "ci_lo": "naive CI low", "ci_hi": "naive CI high",
         "adj_point": "age-adjusted female OR", "adj_ci_lo": "adjusted CI low",
         "adj_ci_hi": "adjusted CI high", "n_discordant_pairs": "discordant pairs",
@@ -568,8 +577,9 @@ whose crash mix shifted sharply, or a genuine plateau. This design cannot separa
     # literal threshold that could drift out of sync with it.
     band_display["headline safe"] = band_display["headline_safe"].map(
         lambda ok: "ok" if ok else "low power")
-    cols = ["vehicle model years", "naive RR (unadjusted, pooled)", "naive CI low",
-            "naive CI high", "age-adjusted female OR", "adjusted CI low", "adjusted CI high",
+    cols = ["vehicle model years", "pairs", "she died, he didn't", "he died, she didn't",
+            "naive RR (unadjusted, pooled)", "naive CI low", "naive CI high",
+            "age-adjusted female OR", "adjusted CI low", "adjusted CI high",
             "discordant pairs", "headline safe"]
     st.dataframe(band_display[cols].style.apply(_grey_low_power, axis=1), hide_index=True)
     st.caption(f"Rows flagged **low power** carry fewer than the {POWER_FLOOR}-discordant-pair "
@@ -605,9 +615,7 @@ whose crash mix shifted sharply, or a genuine plateau. This design cannot separa
 
 st.subheader("Is the passenger seat worse for women specifically?")
 st.markdown(f"Mixed-sex pairs cannot answer this, so male-male and female-female pairs are "
-            f"compared instead (FARS {FULL}). Age-adjusted, the passenger seat penalizes "
-            f"female-female pairs where it spares male-male ones. The size depends on the age "
-            f"model.")
+            f"compared instead (FARS {FULL}).")
 samesex = load_samesex_interaction(DB_PATH, FULL)
 male_seat, female_seat = samesex["male"], samesex["female"]
 male_adj, female_adj = samesex["male_ageadj"], samesex["female_ageadj"]
@@ -633,6 +641,22 @@ def _row_headline_safe(row: pd.Series | None) -> bool:
 male_ok, female_ok = _row_headline_safe(male_adj), _row_headline_safe(female_adj)
 interaction_ok = _row_headline_safe(interaction_adj)
 raw_ok = all(_row_headline_safe(r) for r in (male_seat, female_seat, interaction))
+
+# The directional claim renders only when the estimate backing it exists,
+# clears the power floor, and is itself significant; the design doc requires
+# the null reading and the weaker-assumption note next to the number, not
+# below the fold (docs/v1-design.md sections 3 and 6).
+if male_ok and female_ok and interaction_ok:
+    if interaction_adj.ci_lo > 0 or interaction_adj.ci_hi < 0:
+        st.markdown("Age-adjusted, the passenger seat penalizes female-female pairs where it "
+                    "spares male-male ones. The size depends on the age model, and this "
+                    "channel rests on a weaker identifying assumption than the rest of the "
+                    "page.")
+    else:
+        st.markdown("Age-adjusted, the seat-by-sex interaction is not distinguishable from "
+                    "zero in this run. At this sample size that is not strong evidence of no "
+                    "effect, and this channel rests on a weaker identifying assumption than "
+                    "the rest of the page.")
 
 sx_left, sx_right = st.columns(2)
 if male_ok:
@@ -662,8 +686,9 @@ if male_ok and female_ok and interaction_ok:
                         delta=f"95% CI {interaction_cmp.ci_lo:+.3f} to "
                               f"{interaction_cmp.ci_hi:+.3f}",
                         delta_color="off")
-    st.caption("Read the two interaction numbers together: the full-cohort estimate is "
-               "significant, the age-comparable one is roughly half with a CI touching zero.")
+        st.caption("Read the two interaction numbers together: neither alone is the "
+                   "supportable range. The age-comparable refit shows how much of the "
+                   "full-cohort estimate the age model carries.")
     with st.expander("Baselines, raw diagnostics and the identifying assumption"):
         st.markdown("""
 A `female × seat` term cannot be recovered from mixed-sex pairs at all: within any discordant
@@ -717,15 +742,19 @@ if not sev.empty:
     st.subheader("The severity-adjusted gap")
     st.markdown(f"FARS only knows who died. CISS ({ciss_years or '—'}) and NASS-CDS "
                 f"({nass_years or '—'}) grade injuries and reconstruct crash forces, which is "
-                f"where the published numbers live. The delta-V-adjusted estimates here land "
-                f"in the published band without tuning.")
+                f"where the published numbers live. In the two cells with a like-for-like "
+                f"published benchmark (CISS MAIS 2+ against Craig 2024, NASS MAIS 3+ against "
+                f"Bose 2011), the delta-V-adjusted estimate lands near the published number "
+                f"without tuning. The other two cells have no era-matched benchmark.")
     _schart = severity_chart(sev)
     if _schart is not None:
         st.altair_chart(_schart, width="stretch")
         st.caption("Female odds ratio for a moderate-or-worse (MAIS 2+) and serious-or-worse "
                    "(MAIS 3+) injury, belted front-outboard adults in frontal light-vehicle "
                    "crashes, delta-V-adjusted, with 95% CI. Faded marks sit below the power "
-                   "floor.")
+                   "floor. Diamonds mark each published benchmark in its own era's data set "
+                   "only; the full cross table, era mismatches included, is in the expander "
+                   "below.")
     sev_expander = st.expander("The benchmark table, weight diagnostics and AIS sensitivity")
     sev_expander.markdown("""
 FARS knows who died and nothing more, so everything above is a *fatality* contrast within fatal

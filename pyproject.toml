@@ -12,6 +12,8 @@ license = { file = "LICENSE" }
 dependencies = [
     "requests>=2.31",
     "pandas>=2.0",
+    "numpy>=1.24",
+    "statsmodels>=0.14",
     "streamlit>=1.30",
 ]
 

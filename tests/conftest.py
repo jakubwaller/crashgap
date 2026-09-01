@@ -14,16 +14,34 @@ def conn(tmp_path) -> sqlite3.Connection:
 
 def add_pairs(conn: sqlite3.Connection, start_case: int, n: int, *,
               female_seat: int, female_died: int, male_died: int,
-              year: int = 2022) -> int:
+              year: int = 2022, female_age: int = 40, male_age: int = 40,
+              mod_year: int = 2015) -> int:
     """n identical mixed-sex pairs, one per crash. Returns the next free case id."""
     male_seat = 13 if female_seat == 11 else 11
     for i in range(n):
         add_crash(conn, start_case + i, [
             {"sex": 2, "seat_pos": female_seat, "inj_sev": 4 if female_died else 0,
-             "per_typ": 1 if female_seat == 11 else 2},
+             "per_typ": 1 if female_seat == 11 else 2, "age": female_age},
             {"sex": 1, "seat_pos": male_seat, "inj_sev": 4 if male_died else 0,
-             "per_typ": 1 if male_seat == 11 else 2},
-        ], year=year)
+             "per_typ": 1 if male_seat == 11 else 2, "age": male_age},
+        ], year=year, mod_year=mod_year)
+    return start_case + n
+
+
+def add_samesex_pairs(conn: sqlite3.Connection, start_case: int, n: int, *,
+                      sex: str, driver_died: int, passenger_died: int,
+                      year: int = 2022, driver_age: int = 40,
+                      passenger_age: int = 40, mod_year: int = 2015) -> int:
+    """n identical same-sex pairs (one driver, one right-front passenger),
+    mirroring add_pairs's shape for the seat x sex same-sex channel."""
+    sex_code = 2 if sex == "female" else 1
+    for i in range(n):
+        add_crash(conn, start_case + i, [
+            {"sex": sex_code, "seat_pos": 11, "inj_sev": 4 if driver_died else 0,
+             "per_typ": 1, "age": driver_age},
+            {"sex": sex_code, "seat_pos": 13, "inj_sev": 4 if passenger_died else 0,
+             "per_typ": 2, "age": passenger_age},
+        ], year=year, mod_year=mod_year)
     return start_case + n
 
 

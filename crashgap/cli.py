@@ -2,6 +2,7 @@
 
   crashgap ingest --years 2015-2024     download + load FARS into SQLite
   crashgap analyze --years 2015-2024    double-pair estimates -> results table
+  crashgap analyze-v1 --years 2015-2024 conditional-logit estimates -> results table
   crashgap dashboard                    start the Streamlit dashboard
 """
 
@@ -41,6 +42,12 @@ def main(argv: list[str] | None = None) -> int:
     p_analyze.add_argument("--reps", type=int, default=2000,
                            help="bootstrap replicates (default 2000)")
 
+    p_analyze_v1 = sub.add_parser("analyze-v1",
+                                  help="run the within-vehicle conditional-logit estimates")
+    p_analyze_v1.add_argument("--years", default="2015-2024")
+    p_analyze_v1.add_argument("--reps", type=int, default=2000,
+                              help="same-sex channel bootstrap replicates (default 2000)")
+
     sub.add_parser("dashboard", help="start the Streamlit dashboard")
 
     args = parser.parse_args(argv)
@@ -78,6 +85,14 @@ def main(argv: list[str] | None = None) -> int:
                   f"{dec.seat_ci} -> {sig}")
         print("\nmodel-year bands (frontal=core, pooled ratio, no trend claim):")
         print(by_model_year_band(conn, span).to_string(index=False))
+    elif args.command == "analyze-v1":
+        from .analysis import analyze_v1
+        years = parse_years(args.years)
+        span = (years[0], years[-1])
+        conn = connect(args.db)
+        run_ts = analyze_v1(conn, span, reps=args.reps)
+        n = conn.execute("SELECT COUNT(*) FROM results WHERE run_ts = ?", (run_ts,)).fetchone()[0]
+        print(f"wrote {n} fars_condlogit_*/fars_samesex_* rows under run_ts={run_ts}")
     elif args.command == "dashboard":
         app = Path(__file__).resolve().parent.parent / "dashboard" / "app.py"
         os.environ["CRASHGAP_DB"] = args.db

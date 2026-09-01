@@ -140,8 +140,9 @@ def test_analyze_v2_writes_the_full_estimand_contract(conn):
             expected.add(f"{source}_svylogit_female_or_{outcome}_frontal_base_wtrim95")
             if source == "nass":
                 expected.add(f"{source}_svylogit_female_or_{outcome}_frontal_base_ais08")
+                expected.add(f"{source}_svylogit_female_or_{outcome}_frontal_base_ais90dual")
     assert set(rows["estimand"]) == expected
-    assert len(rows) == len(expected) == 18
+    assert len(rows) == len(expected) == 20
 
     years = dict(zip(rows["estimand"], rows["fars_years"]))
     assert years["ciss_svylogit_female_or_mais2plus_frontal_base"] == "2020-2020"
@@ -181,6 +182,7 @@ def test_ais08_rows_use_the_dual_coded_outcome(conn):
     ais08 = rows[rows.estimand == "nass_svylogit_female_or_mais2plus_frontal_base_ais08"]
     info = json.loads(ais08["cohort_def"].iloc[0])
     assert info["ais_revision"] == "AIS2008"
+    assert info["dual_coded_subset"] is True
     # the ais08 fit runs on the dual-coded subset only
     n_dual = conn.execute(
         "SELECT COUNT(*) FROM sev_occupant WHERE source='nass' AND mais08 IS NOT NULL "
@@ -188,3 +190,17 @@ def test_ais08_rows_use_the_dual_coded_outcome(conn):
         "AND seat_pos IN (11,13) AND age BETWEEN 16 AND 96 "
         "AND case_id NOT LIKE 'u%'").fetchone()[0]
     assert info["n_obs"] == n_dual
+
+    # the ais90dual twin: SAME subset, graded by AIS90 mais, so the pair
+    # isolates the revision; its ledger row carries the SUBSET's year span
+    dual90 = rows[rows.estimand == "nass_svylogit_female_or_mais2plus_frontal_base_ais90dual"]
+    info90 = json.loads(dual90["cohort_def"].iloc[0])
+    assert info90["ais_revision"] == "AIS90"
+    assert info90["dual_coded_subset"] is True
+    assert info90["n_obs"] == n_dual
+    years = pd.read_sql_query(
+        "SELECT estimand, fars_years FROM results WHERE run_ts = ?", conn,
+        params=(run_ts,))
+    span = dict(zip(years["estimand"], years["fars_years"]))
+    assert span["nass_svylogit_female_or_mais2plus_frontal_base_ais90dual"] == "2012-2012"
+    assert span["nass_svylogit_female_or_mais2plus_frontal_base_ais08"] == "2012-2012"

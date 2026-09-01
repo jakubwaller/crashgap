@@ -4,9 +4,10 @@ The estimator is the survey convention end to end: a weighted logistic
 pseudo-MLE with Taylor-linearized variance for a stratified,
 with-replacement, single-stage-cluster design (strata = PSUSTRAT, clusters =
 PSU, weights = CASEWGT / RATWGT), and t-based CIs on df = n_PSU - n_strata.
-With ~32 PSUs in 12 strata (CISS) that df is 20, so the t quantile is
-materially wider than a normal one - using z here would overstate certainty
-on exactly the rung whose whole point is honest severity-adjusted intervals.
+The pooled CISS design runs 40 PSUs in 12 strata (df 28) and pooled NASS 27
+PSUs in 12 (df 15), so the t quantile is materially wider than a normal one -
+using z here would overstate certainty on exactly the rung whose whole point
+is honest severity-adjusted intervals.
 
 Years are pooled within a source: PSUs are persistent physical sites, so
 same-PSU rows from different years belong to ONE cluster and (PSUSTRAT, PSU)
@@ -108,9 +109,13 @@ def fit_svylogit(frame: pd.DataFrame, feature_cols: list[str]) -> SvyLogit:
     clusters = frame["psu"].to_numpy()
     n_psus = len(pd.unique(pd.Series(list(zip(strata, clusters)))))
     n_strata = len(np.unique(strata)) if n_obs else 0
+    # NASS CASENO restarts every year within a PSU, so a crash's identity is
+    # (year, psu, case_id) - grouping without year undercounted NASS crashes
+    # 3.9x in the ledger (review finding, 2026-09-01).
+    case_keys = [k for k in ("year", "psu", "case_id") if k in frame.columns]
     diag = {
         "n_obs": n_obs,
-        "n_cases": frame.groupby(["psu", "case_id"]).ngroups if n_obs else 0,
+        "n_cases": frame.groupby(case_keys).ngroups if n_obs else 0,
         "n_psus": n_psus, "n_strata": n_strata,
         "n_events": int(frame["y"].sum()) if n_obs else 0,
         "sum_weight": round(float(w.sum()), 1) if n_obs else 0.0,
@@ -163,8 +168,8 @@ def fit_svylogit(frame: pd.DataFrame, feature_cols: list[str]) -> SvyLogit:
 # --------------------------------------------------------------------------
 
 SEV_COHORT_SQL = f"""
-SELECT psu, psustrat, case_id, veh_no, occ_no, weight AS w, sex_female, age,
-       seat_pos, height, bmi, mais, mais08, mod_year, dv_total
+SELECT year, psu, psustrat, case_id, veh_no, occ_no, weight AS w, sex_female,
+       age, seat_pos, height, bmi, mais, mais08, mod_year, dv_total
 FROM sev_occupant
 WHERE source = :source
   AND is_frontal = 1
@@ -193,15 +198,18 @@ def build_design(cohort: pd.DataFrame, outcome: str, tier: str,
     """Fit-ready frame + feature list for one (outcome, tier).
 
     outcome: 'mais2plus' | 'mais3plus'; tier: 'base' | 'dv' | 'dvanthro';
-    ais: 'contemporary' uses the mais column, 'ais08' the NASS dual-coded
-    mais08 (rows without it drop). Band dummies are reference-coded against
-    the oldest band present - with an intercept in the model, one dummy per
-    band would be a dummy trap."""
+    ais: 'contemporary' uses the mais column on the full cohort; 'ais08'
+    grades the NASS dual-coded subset by mais08; 'ais90dual' grades the SAME
+    dual-coded subset by mais - the pair isolates the AIS revision from the
+    era/subset shift (comparing ais08 against the full-cohort contemporary
+    row conflates the two; review finding, 2026-09-01). Band dummies are
+    reference-coded against the oldest band present - with an intercept in
+    the model, one dummy per band would be a dummy trap."""
     threshold = {"mais2plus": 2, "mais3plus": 3}[outcome]
     frame = cohort.copy()
-    if ais == "ais08":
+    if ais in ("ais08", "ais90dual"):
         frame = frame[frame["mais08"].notna()]
-        grade = frame["mais08"]
+        grade = frame["mais08"] if ais == "ais08" else frame["mais"]
     else:
         grade = frame["mais"]
     frame["y"] = (grade.astype(float) >= threshold).astype(int)
@@ -262,7 +270,9 @@ def _cohort_def_v2(source: str, years: str, outcome: str, tier: str, ais: str,
                    trimmed: bool) -> str:
     return json.dumps({
         "source": source, "years": years, "outcome": outcome, "tier": tier,
-        "ais_revision": {"ciss": "AIS2015"}.get(source, "AIS90") if ais == "contemporary" else "AIS2008",
+        "ais_revision": ("AIS2008" if ais == "ais08"
+                         else {"ciss": "AIS2015"}.get(source, "AIS90")),
+        "dual_coded_subset": ais in ("ais08", "ais90dual"),
         "cohort": "frontal (primary damage plane F, clock 11/12/1), front outboard, "
                   f"belted [{cb.sql_in(scb.SEV_BELTED)}], age {scb.SEV_AGE_MIN}-{scb.SEV_AGE_MAX}, "
                   "known sex + graded MAIS, light vehicle, complete-case per tier",
@@ -337,14 +347,20 @@ def analyze_v2(conn: sqlite3.Connection, reps: int = 0) -> str:
                                fit, None, trimmed=True),
                 fit)
             if source == "nass":
-                # AIS revision sensitivity on the dual-coded 2010+ subset
-                frame, features = build_design(cohort, outcome, "base", ais="ais08")
-                fit = fit_svylogit(frame, features)
-                _write_v2(
-                    conn, run_ts,
-                    f"{source}_svylogit_female_or_{outcome}_frontal_base_ais08",
-                    years,
-                    _cohort_def_v2(source, years, outcome, "base", "ais08",
-                                   fit, None, trimmed=False),
-                    fit)
+                # AIS revision sensitivity: the dual-coded 2010+ subset graded
+                # both ways. The pair isolates the coding change; either row
+                # alone against the full-cohort base conflates it with the
+                # era/subset shift. fars_years carries the SUBSET's span.
+                for ais in ("ais08", "ais90dual"):
+                    frame, features = build_design(cohort, outcome, "base", ais=ais)
+                    fit = fit_svylogit(frame, features)
+                    sub_years = (f"{int(frame['year'].min())}-{int(frame['year'].max())}"
+                                 if len(frame) else years)
+                    _write_v2(
+                        conn, run_ts,
+                        f"{source}_svylogit_female_or_{outcome}_frontal_base_{ais}",
+                        sub_years,
+                        _cohort_def_v2(source, sub_years, outcome, "base", ais,
+                                       fit, None, trimmed=False),
+                        fit)
     return run_ts

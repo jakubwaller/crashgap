@@ -105,7 +105,10 @@ def ciss_frontal(cdc: pd.DataFrame) -> pd.DataFrame:
     ranked = cdc.assign(
         _rank=cdc["DVRANK"].where(cdc["DVRANK"].between(1, 7), 99),
     ).sort_values(["CASENUMBER", "VEHNO", "_rank", "EVENTNO"])
-    primary = ranked.groupby(["CASENUMBER", "VEHNO"], as_index=False).first()
+    # drop_duplicates keeps the first ROW per vehicle; groupby(...).first()
+    # would take the first non-NaN per COLUMN and could chimera fields from
+    # two different events if a primary row ever carried a NaN.
+    primary = ranked.drop_duplicates(subset=["CASENUMBER", "VEHNO"], keep="first").copy()
     primary["is_frontal"] = (
         (primary["CDCPLANE"] == scb.SEV_FRONTAL_PLANE)
         & primary["OCLOCK"].isin(scb.SEV_FRONTAL_CLOCK)
@@ -116,9 +119,12 @@ def ciss_frontal(cdc: pd.DataFrame) -> pd.DataFrame:
 def nass_frontal(ve: pd.DataFrame) -> pd.DataFrame:
     """(PSU, CASENO, VEHNO) -> is_frontal from ve's principal impact:
     GAD1 = 'F' with DOF1 in 11/12/1."""
-    gad = ve["GAD1"]
-    if gad.dtype == object:
-        gad = gad.astype(str).str.strip()
+    # explicit bytes decode: on pandas 2.x, .astype(str) stringifies b'F' to
+    # "b'F'", which would silently classify every vehicle non-frontal (the
+    # production read_sas path returns str, but never rely on that)
+    gad = ve["GAD1"].map(
+        lambda v: v.decode("latin-1") if isinstance(v, (bytes, bytearray)) else v)
+    gad = gad.astype(str).str.strip()
     out = ve[["PSU", "CASENO", "VEHNO"]].copy()
     out["is_frontal"] = (
         (gad == scb.SEV_FRONTAL_PLANE) & ve["DOF1"].isin(scb.SEV_FRONTAL_CLOCK)

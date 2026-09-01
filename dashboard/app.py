@@ -26,6 +26,7 @@ import pandas as pd
 import streamlit as st
 
 from crashgap.analysis import POWER_FLOOR, VEHICLE_AGE_MAX, modern_span
+from crashgap.severity_codebook import SEV_EVENT_FLOOR
 
 DB_PATH = os.environ.get("CRASHGAP_DB", "data/crashgap.db")
 
@@ -252,17 +253,22 @@ def _sev_row(sev: pd.DataFrame, estimand: str) -> pd.Series | None:
     return hits.iloc[0] if not hits.empty else None
 
 
-def _sev_ok(row: pd.Series | None, floor: int = 30) -> bool:
-    """v2's power floor: unweighted positive-outcome count and at least one
-    design df; mirrors _row_headline_safe for the pair channels."""
+def _sev_ok(row: pd.Series | None) -> bool:
+    """v2's power floor (severity_codebook.SEV_EVENT_FLOOR unweighted outcome
+    events, plus at least one design df) - the same rule
+    analysis.headline_safe_mask enforces on these rows; mirrors
+    _row_headline_safe for the pair channels."""
     return (row is not None and pd.notna(row.point)
-            and (row.n_events or 0) >= floor and (row.df or 0) >= 1)
+            and (row.n_events or 0) >= SEV_EVENT_FLOOR and (row.df or 0) >= 1)
 
 
 def _sev_fmt(row: pd.Series | None) -> str:
+    """Benchmark-table cell: every ledger row renders, but one below the
+    power floor is labeled so it is never read at full weight."""
     if row is None or pd.isna(row.point):
         return "—"
-    return f"{row.point:.2f} [{row.ci_lo:.2f}, {row.ci_hi:.2f}]"
+    cell = f"{row.point:.2f} [{row.ci_lo:.2f}, {row.ci_hi:.2f}]"
+    return cell if _sev_ok(row) else cell + " (low power)"
 
 
 def piecewise_agreement_text(condlogit_bands: pd.DataFrame, fars_years: str) -> str:
@@ -365,15 +371,17 @@ sens = pd.DataFrame([
     for v, d in strata.items()
 ])
 st.dataframe(sens, hide_index=True)
-st.warning("""**Read this row-by-row, because the cuts disagree and that is informative.** In the
-two broad frontal cuts the female effect is small and not significant. In the strict head-on cut
-(`MAN_COLL=2`) it is **+11.5% and significant** — and the seat effect *reverses*, with the driver
-faring worse. That reversal is physically plausible rather than noise: head-on collisions are
-predominantly offset toward the driver's side, which is why the driver-side small-overlap crash
-test existed for six years before a passenger-side version was added. The honest reading is that
-the female effect is somewhere in the low single digits to low double digits depending on crash
-geometry, and this window cannot pin it down further. Anyone quoting only the head-on row is
-cherry-picking; so is anyone quoting only the core row.""")
+_headon = strata["headon"]
+st.warning(f"""**Read this row-by-row, because the cuts disagree and that is informative.** In
+the two broad frontal cuts the female effect is small and not significant. In the strict head-on
+cut (`MAN_COLL=2`) it is **{pct(_headon.sex_effect)}
+({'significant' if _headon.sex_is_significant else 'not significant'})** — and the seat effect
+*reverses*, with the driver faring worse. That reversal is physically plausible rather than
+noise: head-on collisions are predominantly offset toward the driver's side, which is why the
+driver-side small-overlap crash test existed for six years before a passenger-side version was
+added. The honest reading is that the female effect is somewhere in the low single digits to low
+double digits depending on crash geometry, and this window cannot pin it down further. Anyone
+quoting only the head-on row is cherry-picking; so is anyone quoting only the core row.""")
 
 st.subheader(f"By vehicle model year (naive, FARS {FULL})")
 st.dataframe(load_bands(DB_PATH, span).rename(columns={
@@ -399,11 +407,16 @@ sensitivity refits — nuisance parameters per band, and vehicles capped at
 age-adjusted female penalty (~+23% to +28%) than 2000s vehicles (~+5% to +11%) — that drop is
 significant with disjoint CIs under **every** specification below, and it reproduces the
 direction of the published decline. Everything after the 2000s band is where the reproduction
-stops: the 2010–2016 and 2017–2026 point estimates sit **at or above** the 2000s level in every
-specification, no post-2000 pairwise contrast is significant, and the newest band still flips
-with the nuisance-pooling choice (1.26 pooled vs 1.10 separate — the age-adjusted seat effect
-varies by band, roughly 1.0 in the older bands vs 1.34 [1.17–1.53] in the newest, so the data
-reject pooling exactly where it matters most). The continuous slope over 55 model years is
+stops: nothing declines further under any specification — the 2010–2016 band sits above the
+2000s level in all three, and the newest band does too except under the separate-nuisance
+refit, where the two are indistinguishable (1.10 vs 1.11). The default fit even reads the
+newest band significantly *above* the 2000s band (a Wald contrast on the pooled-nuisance
+model's own covariance gives p ≈ 0.03) — but that contrast does not survive the
+separate-nuisance refit and no post-2000 contrast has disjoint CIs under any specification, so
+it is a spec-dependent hint of a reversal, not a finding. The newest band still flips with the
+nuisance-pooling choice (1.26 pooled vs 1.10 separate — the age-adjusted seat effect varies by
+band, roughly 1.0 in the older bands vs 1.34 [1.17–1.53] in the newest, so the data reject
+pooling exactly where it matters most). The continuous slope over 55 model years is
 −0.025 log-odds per decade (95% CI −0.062 to +0.013): consistent with a slow decline and with
 zero. Net: **the historical decline into the 2000s is real in this data; a continued decline
 into the newest vehicles is not found** — which may reflect the extra 2020–2024 calendar years
@@ -604,6 +617,7 @@ sex effect, so this tier answers "net of body size", not "is the gap real").
     ciss_base = _sev_row(sev, "ciss_svylogit_female_or_mais2plus_frontal_base")
     nass_base = _sev_row(sev, "nass_svylogit_female_or_mais3plus_frontal_base")
     ais08 = _sev_row(sev, "nass_svylogit_female_or_mais3plus_frontal_base_ais08")
+    ais90dual = _sev_row(sev, "nass_svylogit_female_or_mais3plus_frontal_base_ais90dual")
     diag_bits = []
     for label, row in (("CISS", ciss_base), ("NASS", nass_base)):
         if row is not None and pd.notna(row.point):
@@ -617,11 +631,17 @@ sex effect, so this tier answers "net of body size", not "is the gap real").
                    "hundreds means single cases can move a point estimate — which is why the "
                    "trimmed-weights column and the design-df CIs ship next to every number.")
     if ais08 is not None and pd.notna(ais08.point):
+        pair = (f"the SAME {ais08.fars_years} dual-coded cohort grades "
+                f"{_sev_fmt(ais90dual)} under AIS90 and {_sev_fmt(ais08)} under AIS2008"
+                if ais90dual is not None and pd.notna(ais90dual.point)
+                else f"the {ais08.fars_years} dual-coded cohort grades {_sev_fmt(ais08)} "
+                     f"under AIS2008")
         st.caption(f"**AIS revision sensitivity**: NASS 2010+ dual-codes injuries in AIS90 and "
-                   f"AIS2008; the MAIS 3+ base OR refit on AIS2008 grading is "
-                   f"{_sev_fmt(ais08)}. The revision boundary sits between the NASS-era and "
-                   f"CISS-era benchmarks, so part of any Bose-vs-Craig gap is coding, not crash "
-                   f"physics.")
+                   f"AIS2008, and for MAIS 3+ {pair} — a same-cohort pair, so the difference is "
+                   f"the injury *coding* itself, not an era or cohort shift (comparing either "
+                   f"against the full-window base row would conflate the two). The revision "
+                   f"boundary sits between the NASS-era and CISS-era benchmarks, so part of any "
+                   f"Bose-vs-Craig gap is coding, not crash physics.")
     st.markdown("""
 **The honest read of this table.** The delta-V-adjusted rows land where the literature lands:
 women's frontal crashes carry lower delta-V on average, so the base tier *understates* the
@@ -656,12 +676,14 @@ st.markdown("""
 - **These are within-crash relative risks given a fatal frontal crash — never population rates.**
   FARS records fatal crashes only; every crash here already killed someone.
 - **Not severity-adjusted beyond what the shared vehicle controls.** Same vehicle, same impact,
-  same crash — but occupant age still differs within pairs (women here average ~1.4 years younger).
+  same crash — but occupant age still differs within pairs (women here average ~1.3–1.4 years
+  younger).
   The v0 `fars_doublepair_*` rows do not adjust for that; the v1 `fars_condlogit_*` and `_ageadj`
   rows do (quadratic within-pair age difference).
 - **The published severity-adjusted gap is a different, larger quantity.** Bose (2011) reports
-  MAIS 3+ odds ~1.47 from crash-investigation data. That needs CISS/NASS-CDS with injury grading
-  and survey weights — the next rung, not this tile. Do not read this page as refuting it.
+  MAIS 3+ odds ~1.47 from crash-investigation data with injury grading and survey weights —
+  measured in the severity section above on CISS/NASS-CDS, a different data set and estimand.
+  Do not read the FARS tiles as refuting it.
 - **Coded fields are coarse.** Belt use and injury severity are police-coded (KABCO), not measured.
 - **Two FARS recodes sit inside the full window.** The unknown-age sentinel changed in 2009 and
   IMPACT1 gained side-specific codes in 2010 — both verified harmless for the core frontal cohort

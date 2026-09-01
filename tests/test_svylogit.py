@@ -47,9 +47,14 @@ def _design_frame(n: int, seed: int, female_logodds: float = 0.5,
     })
 
 
-def test_point_estimate_matches_row_replication():
+def test_point_estimate_and_variance_match_row_replication():
     """Integer weight w=k must equal physically replicating the row k times -
-    the defining property of the weighted estimating equation."""
+    for the POINT ESTIMATE (the defining property of the weighted estimating
+    equation) and for the LINEARIZED VARIANCE (per-cluster score totals,
+    A, and B are all identical under replication). The variance half is the
+    tripwire for any misplaced weight power - e.g. w**2 in the scores would
+    pass every equal-weights test in this file but fail here (4x vs 2x per
+    replicated pair)."""
     frame = _design_frame(400, seed=1)
     frame["w"] = np.tile([1.0, 3.0], 200)
     fit = fit_svylogit(frame, ["female", "x"])
@@ -58,8 +63,10 @@ def test_point_estimate_matches_row_replication():
     replicated["w"] = 1.0
     fit_rep = fit_svylogit(replicated, ["female", "x"])
     assert fit.converged and fit_rep.converged
-    assert fit.coef["female"] == pytest.approx(fit_rep.coef["female"], abs=1e-8)
-    assert fit.coef["x"] == pytest.approx(fit_rep.coef["x"], abs=1e-8)
+    for name in ("const", "female", "x"):
+        assert fit.coef[name] == pytest.approx(fit_rep.coef[name], abs=1e-8)
+        assert fit.se[name] == pytest.approx(fit_rep.se[name], rel=1e-6)
+    assert fit.df == fit_rep.df  # same clusters, same strata
 
 
 def test_degenerate_design_matches_hc_sandwich():
@@ -189,6 +196,27 @@ def test_build_design_ais08_subsets_to_dual_coded_rows():
     frame, _ = build_design(cohort, "mais3plus", "base", ais="ais08")
     assert len(frame) == int(cohort["mais08"].notna().sum())
     assert (frame["y"] == 1).all()  # every dual-coded row planted at MAIS08=3
+
+
+def test_headline_safe_mask_reads_v2_event_floor():
+    """The v2 power floor is enforced by the same headline_safe machinery the
+    v1 rows use: a severity row below SEV_EVENT_FLOOR unweighted events (or
+    without a single design df) is never headline-safe, and the v1
+    discordant-pair path is untouched."""
+    import json
+
+    from crashgap.analysis import headline_safe_mask
+    from crashgap.severity_codebook import SEV_EVENT_FLOOR
+
+    rows = pd.DataFrame({"cohort_def": [
+        json.dumps({"n_events": SEV_EVENT_FLOOR, "df": 20}),
+        json.dumps({"n_events": SEV_EVENT_FLOOR - 1, "df": 20}),
+        json.dumps({"n_events": 500, "df": 0}),
+        json.dumps({"n_discordant_pairs": 29}),
+        json.dumps({"n_discordant_pairs": 30}),
+        json.dumps({}),  # v0 row: no split serialized, always safe
+    ]})
+    assert list(headline_safe_mask(rows)) == [True, False, False, False, True, True]
 
 
 def test_svylogit_or_ci_contract():

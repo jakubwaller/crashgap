@@ -17,9 +17,8 @@ from __future__ import annotations
 SEV_SEX_MALE = 1
 SEV_SEX_FEMALE = {2, 3, 4, 5, 6}
 
-# ROLE (both): 1 = driver, 2 = passenger. Non-motorists (8) excluded.
-SEV_ROLE_OCCUPANTS = {1, 2}
-
+# ROLE (both): 1 = driver, 2 = passenger, 8 = non-motorist. Not used as a
+# filter - the front-outboard seat set below implies occupancy.
 # Seat location (CISS SEATLOC, NASS SEATPOS): FARS convention, 11 = driver,
 # 13 = right front.
 SEV_SEAT_FRONT_OUTBOARD = {11, 13}

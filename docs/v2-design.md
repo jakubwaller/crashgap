@@ -59,8 +59,8 @@ unused nullable columns stay where they are; `db.py` says so.
 Front-outboard (11/13) adult (16-96, the v0/v1 window) belted occupants of light vehicles in
 frontal tow-away crashes (both sources are tow-away by design), with known sex and known MAIS.
 Complete-case on the model covariates; every filter and its survivor count is serialized into
-`cohort_def`. Known selection: NASS occupant rows without completed injury workup (~40% of oa
-rows, NaN MAIS/SEATPOS blocks) drop out — the same restriction every published NASS analysis
+`cohort_def`. Known selection: occupant rows without completed injury workup (measured MAIS-ungraded share:
+22% of NASS rows, 17% of CISS) drop out — the same restriction every published NASS analysis
 makes, stated rather than hidden.
 
 ## 5. Model and estimands
@@ -68,21 +68,25 @@ makes, stated rather than hidden.
 Design-weighted logistic pseudo-MLE (survey convention): outcome `MAIS >= k`,
 
 - tier `base`: female + age + age² + right-front seat + model-year-band dummies
-- tier `dv`: base + DVTOTAL + DVTOTAL², on the delta-V-known subset (~45-60% of vehicles;
-  missingness is selective and the tiers exist to show what the subset does to the answer)
-- tier `dv_anthro`: dv + height + BMI, on the subset where both are known — the "is it just
+- tier `dv`: base + DVTOTAL + DVTOTAL², on the delta-V-known subset (measured share_dv_known:
+  CISS 0.61, NASS 0.70; missingness is selective and the tiers exist to show what the subset
+  does to the answer)
+- tier `dvanthro`: dv + height + BMI, on the subset where both are known — the "is it just
   body size" check, the crux of the crash-test-dummy debate (Bose adjusted for height/BMI)
 
 Outcomes: `mais2plus` (Craig's quantity) and `mais3plus` (Bose's), per source. NASS extra:
-`_ais08` sensitivity refits on `MAIS08` for the dual-coded 2010-2015 years, sizing the AIS
-revision effect that sits between NASS-era and CISS-era benchmarks.
+the dual-coded 2010-2015 subset refit BOTH ways on the base tier - `_ais08` (graded by MAIS08)
+and `_ais90dual` (the same subset graded by AIS90 MAIS) - because only the same-cohort pair
+isolates the AIS revision from the era/subset shift (2026-09-01 review); their ledger rows
+carry the subset's own year span in fars_years.
 
 **Variance**: Taylor linearization for a stratified, with-replacement, single-stage-cluster
 design — strata = `PSUSTRAT`, clusters = `PSU`, weights = `CASEWGT`/`RATWGT`:
 `V = A⁻¹ B A⁻¹`, `A = Σ wᵢ pᵢ(1-pᵢ) xᵢxᵢᵀ`,
 `B = Σ_h n_h/(n_h-1) Σ_j (z_hj - z̄_h)(z_hj - z̄_h)ᵀ`, `z_hj = Σ_{i∈PSU hj} wᵢ xᵢ (yᵢ - pᵢ)`,
-CIs on a t distribution with **df = n_PSU − n_strata** (the svy convention; CISS: 32 − 12 = 20,
-so intervals are meaningfully wider than normal-theory ones). A singleton-stratum PSU centers
+CIs on a t distribution with **df = n_PSU − n_strata** (the svy convention; the pooled CISS
+design runs 40 PSUs in 12 strata, df 28, and pooled NASS 27 in 12, df 15 — so intervals are
+meaningfully wider than normal-theory ones). A singleton-stratum PSU centers
 against the grand mean rather than crashing. Tested against statsmodels' cluster sandwich in the
 single-stratum case (they must agree up to the n_h/(n_h−1) factor and df) and against a planted
 stratified-cluster simulation.
@@ -127,8 +131,10 @@ Bose 1.47; CISS MAIS 2+ dv 1.91 vs Craig ~1.75) without being tuned to them; (c)
 does not absorb the effect (only the underpowered CISS MAIS 3+ cell falls under anthro, n.s.
 in both tiers); (d) both pre-registered fragilities are real and measured: max/median weights
 run ~115x (CISS) and ~500x (NASS) with Kish effective n near 10-15% of nominal, and trimming
-moves points by 0.1-0.3 without changing any significance verdict; the AIS revision moves NASS
-MAIS 3+ from 1.21 (AIS90) to 0.93 (AIS2008) on the dual-coded subset — part of the
-Bose-vs-Craig benchmark gap is injury coding, not crash physics; (e) NASS MAIS 3+ base (the
+moves points by up to ~0.3 without changing any significance verdict; the same-subset AIS pair
+(`_ais90dual` vs `_ais08`, dual-coded 2010-2015, n=6,266) isolates the revision: MAIS 3+
+reads 1.31 [0.62-2.76] under AIS90 vs 0.93 [0.60-1.43] under AIS2008 while MAIS 2+ barely
+moves (1.93 vs 1.95) - the serious-injury threshold is where the recoding bites, and part of
+the Bose-vs-Craig benchmark gap is injury coding, not crash physics; (e) NASS MAIS 3+ base (the
 closest cohort to Bose's) is not significant on its own — only the delta-V-adjusted tier is,
 which is also how Bose's model was specified.

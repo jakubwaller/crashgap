@@ -942,11 +942,19 @@ POWER_FLOOR = 30  # discordant pairs; below this a point estimate is not headlin
 
 
 def headline_safe_mask(results: pd.DataFrame) -> pd.Series:
-    """True where a results row carries >= POWER_FLOOR discordant pairs, read
-    from its serialized cohort_def. v0 rows carry no discordant/concordant
-    split at all and are always headline-safe."""
+    """True where a results row clears its channel's power floor, read from
+    its serialized cohort_def: v1 rows carry n_discordant_pairs (floor
+    POWER_FLOOR), v2 severity rows carry n_events (floor SEV_EVENT_FLOOR,
+    plus at least one design df). v0 rows carry neither split and are always
+    headline-safe."""
+    from . import severity_codebook as scb
+
     def ok(cohort_def: str) -> bool:
-        n = json.loads(cohort_def).get("n_discordant_pairs")
+        info = json.loads(cohort_def)
+        if "n_events" in info:
+            return (info["n_events"] >= scb.SEV_EVENT_FLOOR
+                    and info.get("df", 0) >= 1)
+        n = info.get("n_discordant_pairs")
         return n is None or n >= POWER_FLOOR
     return results["cohort_def"].apply(ok)
 

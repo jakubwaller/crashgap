@@ -68,7 +68,7 @@ What this repo adds over the literature (Evans 1988; Bose 2011; Forman 2019; Atw
 2023) is the live, versioned, machine-readable form — not new evidence, and it says so on the page.
 
 What these numbers are **not**: population rates (every crash here already killed someone),
-severity-adjusted odds ratios, age-adjusted (women in these pairs average ~1.4 years younger), or
+severity-adjusted odds ratios, age-adjusted (women in these pairs average ~1.3 years younger), or
 evidence about the model-year trend (this window can't resolve it).
 
 ## v1: age-adjusted regression and the seat × sex interaction
@@ -152,10 +152,14 @@ two-sided:
   specification (default pooled-nuisance, `_separatenuisance`, `_vehage12`, `_agepiecewise`).
   That reproduces the *direction* of the published Atwood/Noh/Craig decline, in-window, for the
   first time in this project.
-- **What is still not found:** any decline after the 2000s band. The 2010–2016 and 2017–2026
-  point estimates sit at or above the 2000s level in every specification (2010–2016: 1.14–1.18;
-  2017–2026: 1.10–1.26), no post-2000 pairwise contrast has disjoint CIs under any
-  specification, and the newest band still flips with the nuisance choice (1.26 pooled vs 1.10
+- **What is still not found:** any decline after the 2000s band. The 2010–2016 band sits above
+  the 2000s level in every specification (1.14–1.18), and the newest band does too (1.23–1.26)
+  except under the separate-nuisance refit, where the two are indistinguishable (1.10 vs 1.11).
+  The default fit even reads the newest band significantly *above* the 2000s band (Wald
+  contrast on the pooled-nuisance model's covariance, p ≈ 0.03) — but that contrast does not
+  survive the separate-nuisance refit and no post-2000 contrast has disjoint CIs under any
+  specification, so it is a spec-dependent hint of a reversal, not a finding. The newest band
+  still flips with the nuisance choice (1.26 pooled vs 1.10
   separate — the age-adjusted seat effect varies by band, roughly 1.0 in the older bands vs
   **1.34 [1.17–1.53]** in 2017+, so the data reject pooling exactly where it matters most). The
   continuous `sex_trend_slope_frontal_core` over the full span is **−0.025** log-odds per decade
@@ -172,10 +176,12 @@ windowed to 1970–2026, so FARS's 9999 "not reported" sentinel never reaches th
 a leverage point.
 
 One number worth flagging so the page doesn't look self-contradictory: the age-adjusted, pooled
-seat effect (`fars_condlogit_seat_effect_rightfront_frontal_core` = 1.05 [0.99–1.12]) is about half
-of v0's +10.8% and no longer significant — age adjustment and the band-varying seat effect above
-absorb much of what v0's geometric-mean split attributed to the seat — and the head-on cut flips it
-clearly protective (0.81 [0.73–0.89]), consistent with v0's head-on reversal.
+seat effect (`fars_condlogit_seat_effect_rightfront_frontal_core`) is small and not significant
+on either window — **1.05 [0.99–1.12] on 2015–2024, 1.03 [0.99–1.07] on 2000–2024** — about half
+of v0's seat-balanced +10.8% (modern; +8.1% full window). Age adjustment and the band-varying
+seat effect above absorb much of what v0's geometric-mean split attributed to the seat — and the
+head-on cut flips it clearly protective (0.81 [0.73–0.89] modern, 0.78 [0.74–0.83] full),
+consistent with v0's head-on reversal.
 
 **The seat × sex interaction, on the full 2000–2024 window: the raw asymmetry is mostly age
 composition; what survives adjustment is now significant and era-stable, but its size still
@@ -188,7 +194,7 @@ passenger 11+ years older roughly twice as often as a male-male pair does), and 
 is what kills in those pairs. The `_ageadj` rows adjust each baseline for the within-pair age
 difference and most of the raw log-ratio evaporates: adjusted male-male 0.91 [0.86–0.95],
 female-female 1.12 [1.04–1.20], interaction **+0.21 (CI +0.12 to +0.30)** for core. On the v1
-release's 2015–2024 window alone this residual looked fragile; with 2.5× the discordant pairs it
+release's 2015–2024 window alone this residual looked fragile; with 2.8× the discordant pairs it
 is statistically solid and stable in direction across calendar eras (2000–2009: +0.22, 2010–2017:
 +0.15, 2018–2024: +0.25 — two of the three individually significant; rerun via
 `age_comparable`/`seatsex_interaction_ageadj` on era-filtered frames). What keeps it short of
@@ -212,7 +218,7 @@ survey weights. v2 ingests both of those sources (CISS 2017–2024 CSV releases 
 2000–2015 SAS files) into a dedicated `sev_occupant` table and fits the survey-convention model:
 a design-weighted logistic pseudo-MLE with Taylor-linearized variance (strata = `PSUSTRAT`,
 clusters = `PSU`, weights = `CASEWGT`/`RATWGT`) and t-based CIs on the design's own degrees of
-freedom — with ~32 PSUs in 12 strata that df is ~20, so honest intervals are visibly wider than
+freedom — 15 (pooled NASS) to 28 (pooled CISS) here, so honest intervals are visibly wider than
 naive ones. Estimand family: `{ciss,nass}_svylogit_female_or_{mais2plus,mais3plus}_frontal_*`.
 
 Cohort: belted front-outboard adults (16–96) with known sex and graded MAIS in frontal
@@ -237,9 +243,10 @@ unchanged at 1.51; both MAIS 2+ cells rise; only the underpowered CISS MAIS 3+ c
 it is not significant in either tier). The measured fragilities ship next to those numbers:
 single cases carry weights up to ~500× the median (Kish effective n ~10% of nominal; the
 `_wtrim95` refit moves NASS MAIS 2+ from 1.72 to 1.45 without changing its significance), and
-the AIS revision alone moves NASS MAIS 3+ from 1.21 [0.93–1.57] (AIS90) to 0.93 [0.60–1.43]
-(AIS2008, dual-coded 2010-2015 subset) — so part of any Bose-vs-Craig gap is injury *coding*,
-not crash physics.
+grading the **same** dual-coded 2010–2015 cohort both ways puts the AIS revision's own effect
+on the table: MAIS 3+ reads 1.31 [0.62–2.76] under AIS90 and 0.93 [0.60–1.43] under AIS2008
+(MAIS 2+ barely moves, 1.93 vs 1.95) — so part of any Bose-vs-Craig gap at the serious-injury
+threshold is injury *coding*, not crash physics.
 
 What v2 deliberately does not do: pool CISS with NASS (different designs, eras, AIS revisions),
 pool either with FARS (different estimand entirely), claim a reproduction of Bose or Craig

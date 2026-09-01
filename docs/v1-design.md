@@ -498,13 +498,18 @@ superseded — the dashboard and README carry the new framing):
   [1.19-1.33] -> 1.09 [1.03-1.15] default; 1.28 -> 1.11 separate-nuisance; 1.23 -> 1.05
   vehage12) has disjoint CIs under every specification: the direction of the published decline
   is reproduced in-window for the first time.
-- No post-2000 pairwise band contrast has disjoint CIs under any specification, the 2010+ bands
-  sit at or above the 2000s level in every specification, and the newest band still flips with
-  the nuisance choice (1.26 pooled vs 1.10 separate; the per-band seat effect stays the reason
-  pooling is rejected: ~1.0 in older bands vs 1.34 [1.17-1.53] in 2017+). Continuous slope
-  -0.025/decade [-0.062, +0.013]. The published continued shrink to ~5.8% is NOT reproduced;
-  candidate explanations (2020-2024 period effects beyond the published study's 2019 endpoint vs
-  a genuine plateau) are stated as unresolvable in this design.
+- No post-2000 pairwise band contrast has disjoint CIs under any specification. The 2010-2016
+  band sits above the 2000s level in every specification; the newest band does in all but the
+  separate-nuisance refit, where the two are indistinguishable (1.0977 vs 1.1057 - "at or above
+  in every specification" is NOT a claim this data supports, per the 2026-09-01 review). A Wald
+  contrast on the default pooled-nuisance fit reads 2017-2026 significantly ABOVE 2000-2009
+  (diff +0.143, se 0.065, p ~ 0.03) - disclosed as a spec-dependent hint of a reversal, not a
+  finding, because it does not survive the separate-nuisance refit. The newest band still flips
+  with the nuisance choice (1.26 pooled vs 1.10 separate; the per-band seat effect stays the
+  reason pooling is rejected: ~1.0 in older bands vs 1.34 [1.17-1.53] in 2017+). Continuous
+  slope -0.025/decade [-0.062, +0.013]. The published continued shrink to ~5.8% is NOT
+  reproduced; candidate explanations (2020-2024 period effects beyond the published study's
+  2019 endpoint vs a genuine plateau) are stated as unresolvable in this design.
 - The age-adjusted seat x sex interaction on the full window is +0.209 [0.121, 0.297] with
   n=7,140/4,744 discordant pairs, era-stable (2000-2009: +0.22, 2010-2017: +0.15, 2018-2024:
   +0.25), while the age-comparable refit reads +0.092 [-0.013, +0.198] — the honest range is the

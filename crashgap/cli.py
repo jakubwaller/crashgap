@@ -127,7 +127,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "dashboard":
         app = Path(__file__).resolve().parent.parent / "dashboard" / "app.py"
         os.environ["CRASHGAP_DB"] = args.db
-        os.execvp(sys.executable, [sys.executable, "-m", "streamlit", "run", str(app)])
+        os.execvp(sys.executable, [sys.executable, "-m", "streamlit", "run", str(app),
+                                   "--client.showSidebarNavigation=false"])
     return 0
 
 

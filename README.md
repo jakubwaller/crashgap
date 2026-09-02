@@ -1,282 +1,132 @@
 # CrashGap
 
-Female-vs-male fatality risk in the *same* crash, computed from public-domain NHTSA
-[FARS](https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars) data, with
-the seat-position confound separated out.
+Do women die more often than men in the same car crash? CrashGap recomputes the answer from
+public NHTSA crash data and shows it at [crashgap.jakubwaller.eu](https://crashgap.jakubwaller.eu).
+When NHTSA publishes a new year, the numbers update.
 
-Cars are crash-tested around the median male body. The literature has measured the consequence
-for decades, but there was no page that recomputes the number when NHTSA publishes a new year.
-CrashGap is that page and the pipeline behind it. Every estimate lands in a SQLite `results`
-table with its run timestamp, git commit, FARS years and serialized cohort definition, and the
-dashboard leads with the decomposition instead of the headline-friendly number.
+## The short answer
 
-## The headline
+Take US fatal frontal crashes where a man and a woman sat belted in the front seats of the same
+car, and count who died. Pooled over FARS 2015–2024 (22,721 such pairs), the woman was the one
+who died 1.09 times as often as the man.
 
-Take belted front-seat mixed-sex pairs in the same vehicle in a fatal frontal crash and pool
-them: women come out 1.09× more likely to be the one who died (FARS 2015–2024, 22,721 pairs).
-That number is misleading. Seat position is the one attribute that differs within every pair,
-and it is about 73/27 collinear with sex: she is the passenger in 16,656 of those pairs and the
-driver in only 6,065. Split by seat configuration and the ratio flips:
+Most of that comes from the seat. On average the right-front passenger seat is the more
+dangerous seat, and the woman was the passenger in 73% of these pairs. Split by who drove, the
+ratio flips:
 
-| configuration | pairs | she died : he died |
+| who sat where | pairs | she died : he died |
 |---|---:|---:|
-| she is the passenger, he drives | 16,656 | 1.153 |
-| she drives, he is the passenger | 6,065 | 0.940 |
+| she is the passenger | 16,656 | 1.15 |
+| she drives | 6,065 | 0.94 |
 
-If sex alone drove the outcome those two ratios would agree. Evans' geometric means separate
-the effects: with *f* the female multiplier and *s* the right-front multiplier, the two
-configurations measure *f·s* and *f/s*, so `sqrt(product)` recovers *f* and `sqrt(quotient)`
-recovers *s*:
+Taking the two apart (Evans' double-pair method):
 
-| effect | frontal core | 95% CI | significant |
-|---|---:|---|---|
-| being female (seat-balanced) | +4.1% | −1.5% to +10.1% | no |
-| sitting right-front | +10.8% | +4.7% to +17.1% | yes |
+| effect | frontal core | 95% CI |
+|---|---:|---|
+| being female, same seat | +4.1% | −1.5% to +10.1% |
+| sitting in the passenger seat | +10.8% | +4.7% to +17.1% |
 
-On FARS 2015–2024, in the primary frontal cut, the seat effect is larger than the sex effect,
-and the pooled 1.09 is mostly seat.
+On this window the seat effect is clear and the female effect could be zero. In strict head-on
+crashes the female effect is +11.5% and clear, and there the driver's seat is the worse one. So
+the female effect in a fatal frontal crash sits somewhere between low single digits and low
+double digits, depending on crash geometry. Quoting only one of those rows would be misleading.
 
-The headline stays on the modern decade although the database holds FARS 2000–2024. The
-question "does being female raise fatality risk in the same crash today" should not absorb
-1990s vehicles as more history is ingested. The full span feeds the trend and same-sex
-sections, where the older vehicle bands have enough pairs.
+The crash-test-dummy debate quotes a bigger number, about 1.5 times the odds of a serious injury
+(Bose 2011). That is a different question on different data. CrashGap measures it too, see the
+injury section below.
 
-The frontal cuts disagree, and the disagreement carries information. In the strict head-on cut
-(`MAN_COLL=2`) the female effect is +11.5% and significant, and the seat effect reverses: the
-driver fares worse. That is physically plausible. Head-on collisions are predominantly offset
-toward the driver's side, which is why the driver-side small-overlap crash test existed for six
-years before a passenger-side one was added. Depending on crash geometry the seat-balanced
-female effect sits somewhere between low single digits and low double digits, and ten years of
-FARS cannot pin it down further. Quoting only the head-on row, or only the core row, is
-cherry-picking.
+## What else the site shows
 
-None of this contradicts the larger published severity-adjusted gap (Bose 2011 reports MAIS 3+
-odds of about 1.47). That is a different quantity on different data, measured in the v2 section
-below.
+### Does the gap shrink with newer cars?
 
-## Method
+Partly. On FARS 2000–2024, adjusted for age, cars built before 2000 carry a female penalty of
+1.26 [1.19–1.33] and 2000s cars 1.09 [1.03–1.15]. That drop holds under every specification.
+After the 2000s nothing declines further. The published decline into the newest cars (down to
+5.8%) is not found in this data. Whether that is a real plateau or the 2020–2024 years this
+window adds cannot be told apart in this design.
 
-Evans double-pair design: only vehicles carrying exactly one eligible male and one eligible
-female (both belted, front outboard, age 16–96, light vehicle) enter. That holds crash
-severity, delta-V, vehicle and impact direction physically constant within the vehicle. FARS is
-a census of *fatal* crashes, so a raw occupant-level odds ratio would be dominated by
-crash-involvement selection and can point the wrong way. Hence the within-vehicle design, and
-the seat split on top of it. Frontal is pinned to IMPACT1 ∈ {11, 12, 1} (Forman 2019), with the
-wider fan and head-on cut reported as sensitivity variants. Every code set is a literal in
-`crashgap/codebook.py` with its source next to it. Confidence intervals are percentile
-bootstraps that resample whole crashes, never persons, with both seat strata resampled inside
-one replicate.
+### Is the passenger seat worse for women specifically?
 
-The finding itself is settled literature (Evans 1988; Bose 2011; Forman 2019; Atwood, Noh &
-Craig 2023). This repo adds the live, versioned form and says so on the page. Every crash here
-already killed someone, so nothing above is a population rate. Age and severity adjustments
-come in v1 and v2 below.
+A man and a woman in one car cannot answer this, because in every such pair she is the woman. So
+cars with two men are compared with cars with two women. The driver dies more often among two men, and the passenger among two women. Most of
+that raw difference is age, because in a two-women car the passenger is far more often much older
+than the driver. Adjusted for age, a female-specific passenger penalty of roughly +10% to +23%
+remains. This comparison rests on a weaker design than the rest of the site, and the site says so
+next to the number.
 
-## v1: age adjustment, the trend, and the seat × sex interaction
+### The injury gap
 
-v0's decomposition cannot separate age from sex and says nothing about the model-year trend or
-about whether the seat effect differs by sex. v1 adds a within-vehicle differenced conditional
-logit (`statsmodels` is the new dependency; `Logit` is the only call site). For a 2-occupant
-stratum the matched-pairs conditional MLE has a closed form: the stratum likelihood depends
-only on the difference of the linear predictor between the two occupants, so the fit reduces to
-an intercept-free logistic regression on covariate differences (her value minus his) over
-discordant pairs only. Concordant pairs carry no information and drop out, as in v0.
-Covariates: seat, age difference, and age-difference × mean-age (a closed-form quadratic in
-age). CIs are cluster-robust on crash id and cross-checked against the crash-clustered
-bootstrap.
+FARS only knows who died. CISS (2017–2024) and NASS-CDS (2000–2015) are crash-investigation
+samples with graded injuries and reconstructed crash forces, which is where the published numbers
+come from. Fitted with the same kind of model those studies use and adjusted for crash force
+(delta-V), the female odds of injury land close to them: 1.50 [1.10–2.04] for a serious injury
+(MAIS 3+, NASS-CDS) against Bose's 1.47, and 1.91 [1.23–2.96] for a moderate one (MAIS 2+, CISS)
+against Craig's ~1.75. That is not a replication, since cohorts, frontal definitions and
+injury-coding revisions differ from those studies, and the two sources are never pooled with each
+other or with FARS. Adjusting for height and BMI does not remove the gap. Two things weaken it
+and are measured on the site: single cases carry very large survey weights, and the injury
+coding revision alone moves the MAIS 3+ number.
 
-Two estimand families, kept structurally apart:
+## How it is computed
 
-- `fars_condlogit_*` is the mixed-sex channel. `sex_effect_frontal_{variant}_band_{lo}-{hi}` is
-  the age-adjusted per-band female odds ratio and the direct answer to the trend question;
-  `_pooled` collapses the bands into one coefficient; `sex_trend_slope_*` is a separate
-  continuous model-year fit (never jointly with the band dummies, which are a coarsened
-  function of the same variable); `seat_effect_rightfront_*`, `age_slope_*` and
-  `age_curvature_*` are the shared nuisance coefficients. Every `_band_*` row also exists in
-  three sensitivity variants: `_separatenuisance` (seat and age refit inside each band),
-  `_agepiecewise` (piecewise-linear age with a knot at 65), and `_vehage12` (vehicles at most
-  12 years old at crash, which puts bands on comparable vehicle-age support and makes band and
-  calendar period nearly synonymous, the same mixing the published FARS trend estimates
-  accept). No sensitivity variant is headlined. A band-level claim that does not hold across
-  all of them depends on a modelling assumption rather than on the data.
-- `fars_samesex_*` is a structurally separate channel: right-front-passenger-vs-driver fatality
-  odds (above 1 means the passenger seat is the deadlier one) within discordant male-male pairs
-  and, separately, female-female pairs. This is what identifies the seat × sex interaction.
-  Within a mixed-sex pair the female contrast is fixed at 1, so a `female × seat` term computed
-  from mixed pairs is algebraically the seat main effect; the interaction is unidentified
-  there, at any sample size. `seat_effect_male_*` / `seat_effect_female_*` are the raw
-  baselines; `seatsex_interaction_*` is their **log**-ratio (its null is 0, not 1). The
-  `_ageadj` variants refit each baseline with a quadratic within-pair age-difference term and
-  are the headline versions, because the two cohorts differ sharply in who sits where at what
-  age. `seatsex_interaction_ageadj_agecomparable_*` restricts the fit to pairs at most 10 years
-  apart, where the age model interpolates instead of extrapolating; quote it next to the
-  full-cohort `_ageadj` row. This channel never shares nuisance parameters with the mixed-sex
-  channel. Same-sex pairs are not sex-paired within the same crash, so who rides with whom can
-  correlate with severity or vehicle type. Every number from this channel rests on a weaker
-  identifying assumption than the rest of the page, and the dashboard says so next to the
-  number.
+Only cars with exactly one eligible man and one eligible woman enter (both belted, front outboard,
+age 16–96, light vehicle), so the crash, the car and the impact are the same for both. FARS
+records fatal crashes only, so every number compares who died given that someone did. None of
+them is a population rate. Frontal means IMPACT1 in {11, 12, 1}; a wider fan and the head-on cut
+are sensitivity variants. The seat-split intervals resample whole crashes. The age-adjusted
+numbers come from a within-car conditional logit with crash-clustered standard errors, the injury
+numbers from a design-weighted logistic regression with survey-design variance. The full design
+and every sensitivity check are in [docs/v1-design.md](docs/v1-design.md) and
+[docs/v2-design.md](docs/v2-design.md).
 
-`fars_doublepair_*` (v0) is untouched, still headed by the row explicitly named
-`_seatconfounded`. The pooled age-adjusted `_pooled` figure is not a drop-in replacement for
-v0's seat-balanced +4.1%: on FARS 2015–2024 it reads about 1.18× (core, CI 1.11–1.26). The two
-measure related but different things. v0 nets out the seat effect through the geometric mean of
-two seat-split ratios with no age term; v1 pools an age-adjusted band model with one shared
-seat coefficient. This design does not resolve which is closer to the true seat-balanced
-effect, so read both.
+The finding itself is settled literature (Evans 1988; Bose 2011; Forman 2019; Atwood, Noh & Craig
+2023). This repo adds the live, versioned form: every estimate lands in a SQLite `results` table
+with its run timestamp, git commit, data years and serialized cohort definition.
 
-Power floor: a `results` row backed by fewer than 30 discordant pairs is written to the table
-but never headlined. Check `n_discordant_pairs` in the row's `cohort_def` before trusting a
-number pulled straight from SQL; `n_pairs` counts the eligible cohort including concordant
-pairs and overstates effective power on its own.
+## The results table
 
-### The trend, on the full 2000–2024 window
+| estimand prefix | what it holds |
+|---|---|
+| `fars_doublepair_*` | the seat-split estimates; the pooled row is named `_seatconfounded` so nobody quotes it as the headline |
+| `fars_condlogit_*` | age-adjusted female effect per model-year band, the trend slope, and the shared seat and age terms; `_separatenuisance`, `_agepiecewise` and `_vehage12` are sensitivity refits; `_pooled` collapses the bands and is not a substitute for the seat-balanced +4.1% |
+| `fars_samesex_*` | passenger-vs-driver odds inside two-men and two-women cars and their log-ratio; quote the `_ageadj` rows together with `_agecomparable` |
+| `{ciss,nass}_svylogit_*` | female injury odds ratios for MAIS 2+ and 3+ in the `base`, `dv` and `dvanthro` tiers, plus `_wtrim95` and the AIS coding pair |
 
-The v1 release's 2015–2024 window left the trend unidentified: the per-band pattern flipped
-with the nuisance-pooling assumption and the two oldest bands had almost no power (vehicles
-from the 1990s are nearly extinct on modern roads). Ingesting FARS 2000–2014 multiplied the
-oldest band's discordant pairs by ten (553 → 5,532). Where that leaves the trend question:
-
-- Identified: pre-2000 vehicles carry a clearly higher age-adjusted female penalty than 2000s
-  vehicles. `band_1970-1999` = 1.26 [1.19–1.33] against `band_2000-2009` = 1.09 [1.03–1.15],
-  with disjoint CIs under every specification (default pooled-nuisance, `_separatenuisance`,
-  `_vehage12`, `_agepiecewise`). That reproduces the direction of the published
-  Atwood/Noh/Craig decline, in-window, for the first time in this project.
-- Not found: any decline after the 2000s band. The 2010–2016 band sits above the 2000s level in
-  every specification (1.14–1.18) and the newest band does too (1.23–1.26), except under the
-  separate-nuisance refit, where the two are indistinguishable (1.10 vs 1.11). The default fit
-  reads the newest band significantly *above* the 2000s band (Wald contrast on the
-  pooled-nuisance model's covariance, p ≈ 0.03), but that contrast does not survive the
-  separate-nuisance refit, and no post-2000 contrast has disjoint CIs under any specification.
-  It stays a spec-dependent hint of a reversal and is not counted as a finding. The newest band
-  still flips with the nuisance choice (1.26 pooled vs 1.10 separate; the age-adjusted seat
-  effect is about 1.0 in the older bands and 1.34 [1.17–1.53] in 2017+, so the data reject
-  pooling exactly where it matters most). The continuous `sex_trend_slope_frontal_core` over
-  the full span is −0.025 log-odds per decade (95% CI −0.062 to +0.013), consistent with a slow
-  decline and with zero. The published continued shrink to ~5.8% in the newest bands is not
-  reproduced. Candidate explanations: the 2020–2024 calendar years this window adds beyond that
-  study's 2019 endpoint (a period whose crash mix shifted sharply), or a genuine plateau. Model
-  year, vehicle age and calendar period are linearly dependent and none of them varies within a
-  vehicle, so this design cannot say which.
-
-The piecewise-linear age variant agrees with the quadratic default to within ~0.2% in every
-band, so age functional form is not what drives any of this. The `mod_year` regressor stays
-windowed to 1970–2026, so FARS's 9999 "not reported" sentinel never reaches the continuous fit
-as a leverage point.
-
-One number to know so the page does not look self-contradictory: the age-adjusted pooled seat
-effect (`fars_condlogit_seat_effect_rightfront_frontal_core`) is small and not significant on
-either window (1.05 [0.99–1.12] on 2015–2024, 1.03 [0.99–1.07] on 2000–2024), about half of
-v0's seat-balanced +10.8% (modern; +8.1% full window). Age adjustment and the band-varying seat
-effect absorb much of what v0's geometric-mean split attributed to the seat. The head-on cut
-flips it clearly protective (0.81 [0.73–0.89] modern, 0.78 [0.74–0.83] full), consistent with
-v0's head-on reversal.
-
-### The interaction, on the full 2000–2024 window
-
-The raw passenger-vs-driver baselines run in opposite directions by sex. Among male-male pairs
-the *driver* dies more often (right-front OR 0.89, CI 0.85–0.94, n=7,140 discordant pairs);
-among female-female pairs the *passenger* does (OR 1.56, CI 1.47–1.65, n=4,744). The raw
-interaction log-ratio is +0.56 (CI +0.48 to +0.63, null = 0) for core. Most of that is age
-composition: a female-female pair carries a right-front passenger 11+ years older roughly twice
-as often as a male-male pair does, and in those pairs age is the strongest predictor of who
-dies. The `_ageadj` rows adjust each baseline and most of the raw log-ratio goes away: adjusted
-male-male 0.91 [0.86–0.95], female-female 1.12 [1.04–1.20], interaction +0.21 (CI +0.12 to
-+0.30) for core. On the 2015–2024 window alone this residual looked fragile; with 2.8× the
-discordant pairs it is statistically solid and stable in direction across calendar eras
-(2000–2009: +0.22, 2010–2017: +0.15, 2018–2024: +0.25, two of the three individually
-significant). The `_agecomparable` fragility row keeps it short of settled: restricted to pairs
-within 10 years of each other, where the quadratic age model interpolates instead of
-extrapolating, the interaction reads +0.09 (CI −0.01 to +0.20), roughly half the full-cohort
-value with a CI touching zero. Read the two numbers together: consistent evidence of a
-female-specific right-front penalty, magnitude somewhere between roughly +10% and +23%, carried
-disproportionately by large-age-gap pairs. The same-sex identifying assumption in §3/§6 of the
-design notes applies to all of it.
-
-## v2: the severity rung (CISS and NASS-CDS)
-
-Everything above is a *fatality* contrast inside fatal crashes, because FARS carries nothing
-else. The numbers the crash-test-dummy debate actually cites (Bose 2011's MAIS 3+ odds ratio
-1.47, Craig 2024's MAIS 2+ ~1.75) are severity-adjusted injury odds, measured on
-crash-investigation samples with hospital-grade AIS injury grading, reconstructed delta-V and
-survey weights. v2 ingests both sources (CISS 2017–2024 CSV releases and NASS-CDS 2000–2015 SAS
-files) into a dedicated `sev_occupant` table and fits the survey-convention model: a
-design-weighted logistic pseudo-MLE with Taylor-linearized variance (strata = `PSUSTRAT`,
-clusters = `PSU`, weights = `CASEWGT`/`RATWGT`) and t-based CIs on the design's own degrees of
-freedom, 15 (pooled NASS) to 28 (pooled CISS) here, so the intervals come out visibly wider
-than naive ones. Estimand family:
-`{ciss,nass}_svylogit_female_or_{mais2plus,mais3plus}_frontal_*`.
-
-Cohort: belted front-outboard adults (16–96) with known sex and graded MAIS in frontal
-light-vehicle tow-away crashes; frontal means the primary damage event has plane F at 11–1
-o'clock (`ve` GAD1/DOF1 for NASS, the CDC file's ranked events for CISS), symmetric with the
-FARS core zone. Three covariate tiers per outcome: `base` (age, seat, model-year band), `dv`
-(adds ΔV and ΔV² on the subset where reconstruction succeeded), `dvanthro` (adds height and
-BMI). Height and BMI partly mediate a sex effect, so the third tier answers what remains net of
-body size; it does not test whether the gap is real. Sensitivities: `_wtrim95` caps weights at
-the cohort's 95th percentile (every row's `cohort_def` carries the Kish effective n and the
-max/median weight ratio, which makes the Viano 2025 weight-instability critique measurable),
-and `_ais08` refits NASS on its dual-coded AIS2008 grading, sizing the revision boundary that
-sits between the Bose-era and Craig-era benchmarks. The power floor here is 30 unweighted
-outcome events.
-
-Where the first canonical run landed (CISS 52,943 + NASS-CDS 150,897 ingested occupants;
-frontal cohorts 13,145 / 28,220): the delta-V-adjusted estimates sit where the literature sits.
-NASS MAIS 3+ `dv` = 1.50 [1.10–2.04] against Bose's published 1.47; CISS MAIS 2+ `dv` = 1.91
-[1.23–2.96] against Craig's ~1.75. The base tiers sit below them, because women's frontal
-crashes carry lower delta-V on average, the direction every published severity analysis
-reports. The body-size tier does not absorb the effect: NASS MAIS 3+ stays at 1.51, both
-MAIS 2+ cells rise, and only the underpowered CISS MAIS 3+ cell falls (not significant in
-either tier). The measured fragilities ship next to those numbers. Single cases carry weights
-up to ~500× the median (Kish effective n ~10% of nominal; the `_wtrim95` refit moves NASS
-MAIS 2+ from 1.72 to 1.45 without changing its significance). Grading the *same* dual-coded
-2010–2015 cohort both ways isolates the AIS revision itself: MAIS 3+ reads 1.31 [0.62–2.76]
-under AIS90 and 0.93 [0.60–1.43] under AIS2008, while MAIS 2+ barely moves (1.93 vs 1.95). Part
-of any Bose-vs-Craig gap at the serious-injury threshold comes from injury coding rather than
-crash physics.
-
-v2 never pools CISS with NASS (different designs, eras, AIS revisions), never pools either with
-FARS (different estimand entirely), and does not claim a reproduction of Bose or Craig: frontal
-definitions, cohorts and covariate sets differ in ways `docs/v2-design.md` documents. The
-dashboard shows the published numbers for orientation, with the differences beside them.
+A row backed by fewer than 30 discordant pairs (30 outcome events for the injury rows) is written
+but never headlined. Check `n_discordant_pairs` in `cohort_def` before quoting a number straight
+from SQL; `n_pairs` counts the whole eligible cohort and overstates power.
 
 ## Usage
 
 ```bash
-pip install -e .
+pip install -e .                       # pandas, statsmodels, streamlit, altair
 crashgap ingest --years 2000-2024      # ~470 MB of zips from static.nhtsa.gov, cached in data/raw
-crashgap analyze --years 2015-2024     # modern-window estimates (the dashboard headline)
-crashgap analyze --years 2000-2024     # full-window estimates (the trend sections)
-crashgap analyze-v1 --years 2015-2024  # conditional-logit rows, modern window
-crashgap analyze-v1 --years 2000-2024  # conditional-logit rows, full window
-crashgap ingest-severity               # CISS + NASS-CDS for the v2 severity rung
-crashgap analyze-v2                    # severity estimands
-crashgap dashboard                     # Streamlit dashboard on :8501
+crashgap analyze --years 2015-2024     # modern window, the dashboard headline
+crashgap analyze --years 2000-2024     # full window, the trend sections
+crashgap analyze-v1 --years 2015-2024  # age-adjusted rows, modern window
+crashgap analyze-v1 --years 2000-2024  # age-adjusted rows, full window
+crashgap ingest-severity               # CISS + NASS-CDS
+crashgap analyze-v2                    # injury odds ratios
+crashgap dashboard                     # Streamlit on :8501
 ```
 
-Everything lands in `data/crashgap.db` and re-running any step is idempotent. The dashboard
-reads the latest run per (estimand family, window), so both windows need both `analyze` and
-`analyze-v1` runs. v0's pooled ratio is explicitly named `_seatconfounded` so it cannot be
-mistaken for the headline; v1 and v2 write their own estimand families under the same `results`
-table and never touch v0's rows.
+Everything lands in `data/crashgap.db` and every step is idempotent. The dashboard reads the
+latest run per estimand family and window, so both windows need both `analyze` and `analyze-v1`.
 
 ## Refresh
 
-FARS publishes one new year annually and finalizes the previous release; CISS publishes one new
-year annually (NASS-CDS ended 2015 and never changes). `deploy/refresh.sh` re-pulls the newest
-years and re-runs every analysis pass. Point a monthly cron at it and the numbers update
-themselves when NHTSA ships.
+FARS and CISS each publish one new year a year. `deploy/refresh.sh` re-pulls the newest years and
+re-runs every analysis. Point a monthly cron at it.
 
 ## Data
 
-NHTSA FARS National CSV releases, 1975–2024, US public domain; this repo pools 2000–2024. Two
-FARS recodes sit inside that span and were verified against the real files before widening it
-(see `crashgap/codebook.py`): the unknown-age sentinel changed schemes in 2009 (99 → 998/999,
-both outside the 16–96 age window), and IMPACT1 gained side-specific codes in 2010, which
-drains the *wide* frontal variant's clock points 2 and 10 while the core zone {11, 12, 1} and
-the MAN_COLL=2 head-on cut stay continuous across the boundary. The 2024 file is an Annual
-Report File and gets revised by NHTSA before final release. CISS and NASS-CDS are US public
-domain as well.
+NHTSA FARS National CSV releases, 2000–2024, US public domain. Two FARS recodes sit inside that
+span: the unknown-age code changed in 2009 and the impact-point codes in 2010. Both were checked
+against the real files and are harmless for the core cohort. The wide frontal variant selects a
+somewhat narrower crash set after 2010, so cross-era comparisons of that one variant carry an
+asterisk (see `crashgap/codebook.py`). The newest FARS year is an annual report file and gets
+revised before final release. CISS and NASS-CDS are US public domain as well.
 
 ## License
 
-MIT. The data is US-federal public domain; the caveats ship on the same page as the numbers.
+MIT. The data is US-federal public domain.

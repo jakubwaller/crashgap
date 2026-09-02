@@ -469,20 +469,25 @@ def clear(ci_lo: float, ci_hi: float, null: float = 1.0) -> bool:
 # The short version: three sentences a first-time reader can stop after. The
 # female effect is a range because the frontal cuts disagree and quoting
 # either one alone is cherry-picking (see the first expander).
-_effects = [(d.sex_effect - 1) * 100 for d in strata.values() if d.sex_effect is not None]
-lo, hi = (min(_effects), max(_effects)) if _effects else (None, None)
+_effects = [((d.sex_effect - 1) * 100, d) for d in strata.values() if d.sex_effect is not None]
+if _effects:
+    (lo, _lo_cut), (hi, _) = min(_effects, key=lambda e: e[0]), max(_effects, key=lambda e: e[0])
+    # one phrase for the range, reused below; a low end at or below zero is said as such
+    range_phrase = (f"between about zero and {hi:.0f}%" if lo <= 0
+                    else f"between roughly {lo:.0f}% and {hi:.0f}%")
+    low_end_zero = lo > 0 and not _lo_cut.sex_is_significant
+else:
+    lo = hi = range_phrase = None
+    low_end_zero = False
 share = 100 * core.n_pairs_she_passenger / core.n_pairs
 headon_flip = headon.seat_effect is not None and headon.seat_effect < 1 \
     and headon.seat_is_significant
-if lo is None:
+if range_phrase is None:
     female_range = "being a woman adds an amount this run could not estimate"
-elif lo <= 0:
-    female_range = (f"being a woman adds between about zero and {hi:.0f}% to the risk of being "
-                    f"the one who died, depending on the type of frontal crash")
 else:
-    female_range = (f"being a woman adds roughly {lo:.0f}% to {hi:.0f}% to the risk of being "
-                    f"the one who died, depending on the type of frontal crash, and the low end "
-                    f"could be zero")
+    female_range = (f"being a woman adds {range_phrase} to the risk of being the one who died, "
+                    f"depending on the type of frontal crash"
+                    + (", and the low end could be zero" if low_end_zero else ""))
 st.markdown(f"Averaged over fatal frontal crashes, the passenger seat is the more dangerous seat"
             f"{' (head-on collisions are the exception)' if headon_flip else ''}. Women sit "
             f"there more often, and that explains most of the raw gap. Once the seat is "
@@ -534,8 +539,8 @@ with st.expander("The counts, and what changes with the crash type"):
     _flip = (" and the driver's seat is the worse one, plausibly because head-on collisions "
              "mostly hit the driver's side (the driver-side small-overlap crash test existed "
              "six years before a passenger-side one)") if headon_flip else ""
-    _range = (f" So the female effect sits between roughly {lo:.0f}% and {hi:.0f}% depending on "
-              f"crash geometry, and this data cannot pin it down further.") if lo else ""
+    _range = (f" So the female effect sits {range_phrase} depending on crash geometry, and this "
+              f"data cannot pin it down further.") if range_phrase is not None else ""
     st.warning(f"Head-on crashes differ. There the female effect is **{pct(headon.sex_effect)}** "
                f"({'clear' if headon.sex_is_significant else 'not clear'}){_flip}.{_range} "
                f"Quoting only one row would be misleading.")

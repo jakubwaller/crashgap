@@ -4,6 +4,8 @@ Do women die more often than men in the same car crash? CrashGap recomputes the 
 public NHTSA crash data and shows it at [crashgap.jakubwaller.eu](https://crashgap.jakubwaller.eu).
 When NHTSA publishes a new year, the numbers update.
 
+The idea came from reading [*Invisible Women*](https://en.wikipedia.org/wiki/Invisible_Women:_Exposing_Data_Bias_in_a_World_Designed_for_Men) by Caroline Criado Perez.
+
 ## The short answer
 
 Take US fatal frontal crashes where a man and a woman sat belted in the front seats of the same

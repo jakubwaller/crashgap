@@ -434,6 +434,8 @@ def severity_chart(sev: pd.DataFrame) -> alt.Chart | None:
 st.title("CrashGap")
 st.caption("Do women die more often than men in the same crash? Public US crash data (NHTSA), "
            "recomputed when a new year comes out.")
+st.caption("The idea came from reading [*Invisible Women*](https://en.wikipedia.org/wiki/Invisible_Women:_Exposing_Data_Bias_in_a_World_Designed_for_Men) "
+           "by Caroline Criado Perez.")
 
 span = db_span(DB_PATH)
 if span is None:

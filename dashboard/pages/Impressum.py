@@ -17,6 +17,8 @@ Ludwig-Erhard-Str. 18\\
 
 E-Mail: [crashgap@jakubwaller.eu](mailto:crashgap@jakubwaller.eu)
 
+Kontaktformular: [buergerwecker.de/kontakt](https://buergerwecker.de/kontakt?projekt=crashgap)
+
 ## Verantwortlich für den Inhalt
 
 Jakub Waller (Anschrift wie oben)

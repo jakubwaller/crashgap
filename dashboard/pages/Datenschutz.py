@@ -13,7 +13,7 @@ Jakub Waller, c/o IP-Management #11204, Ludwig-Erhard-Str. 18, 20459 Hamburg, E-
 
 ## Grundsatz
 
-Diese Website ist ein statistisches Dashboard: keine Konten, keine Formulare, keine Analyse-
+Diese Website ist ein statistisches Dashboard: keine Konten, keine Formulare auf dieser Seite, keine Analyse-
 oder Tracking-Cookies, keine serverseitige Datenbank mit Besucherdaten. Die dargestellten
 Zahlen stammen aus öffentlichen US-Unfalldatenbanken und enthalten keine Daten von Besuchern
 dieser Seite.
@@ -32,10 +32,13 @@ setzt ggf. ein technisch notwendiges Anti-Bot-Cookie — kein Profiling, keine E
 erforderlich. Cloudflare ist nach dem EU-US Data Privacy Framework zertifiziert; ein
 Auftragsverarbeitungsvertrag (AVV) besteht.
 
-## Kontakt per E-Mail
+## Kontakt per E-Mail oder Formular
 
 Bei Kontakt per E-Mail werden die übermittelten Angaben nur zur Bearbeitung des Anliegens
-verarbeitet (Art. 6 Abs. 1 lit. f DSGVO) und nicht weitergegeben.
+verarbeitet (Art. 6 Abs. 1 lit. f DSGVO) und nicht weitergegeben. Das im Impressum verlinkte
+Kontaktformular liegt auf [buergerwecker.de](https://buergerwecker.de/datenschutz), einer weiteren
+Website desselben Betreibers; für die dortige Verarbeitung gilt deren Datenschutzerklärung. Diese
+Website selbst erhebt und speichert dabei nichts.
 
 ## Deine Rechte
 

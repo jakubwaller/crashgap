@@ -45,7 +45,20 @@ SAMESEX_INTERACTION = "fars_samesex_seatsex_interaction_frontal_"
 st.set_page_config(page_title="CrashGap", page_icon="🚗", layout="centered")
 
 
-@st.cache_data(ttl=3600)
+@st.cache_resource
+def _cache_state() -> dict:
+    return {"db_mtime": None}
+
+
+# The numbers change only when the DB file does (a refresh), so the loaders below cache until
+# then; an hourly TTL re-ran the ~20 s bootstraps for the first visitor of every hour.
+_db_mtime = os.path.getmtime(DB_PATH) if os.path.exists(DB_PATH) else None
+if _cache_state()["db_mtime"] != _db_mtime:
+    st.cache_data.clear()
+    _cache_state()["db_mtime"] = _db_mtime
+
+
+@st.cache_data
 def db_span(db_path: str) -> tuple[int, int] | None:
     """Full ingested (min_year, max_year) span, or None on an empty DB."""
     if not Path(db_path).exists():
@@ -61,7 +74,7 @@ def db_span(db_path: str) -> tuple[int, int] | None:
     return int(row[0]), int(row[1])
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data
 def load_results(db_path: str, fars_years: str) -> pd.DataFrame:
     """Latest run of each estimand family FOR THE GIVEN WINDOW. v0
     (`fars_doublepair_*`) and v1 (`fars_condlogit_*`/`fars_samesex_*`) rows
@@ -89,7 +102,7 @@ def load_results(db_path: str, fars_years: str) -> pd.DataFrame:
         conn.close()
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data
 def load_strata(db_path: str, span: tuple[int, int]) -> dict:
     from crashgap.analysis import decompose
     conn = sqlite3.connect(db_path)
@@ -99,7 +112,7 @@ def load_strata(db_path: str, span: tuple[int, int]) -> dict:
         conn.close()
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data
 def load_bands(db_path: str, span: tuple[int, int]) -> pd.DataFrame:
     from crashgap.analysis import by_model_year_band
     conn = sqlite3.connect(db_path)
@@ -134,7 +147,7 @@ def _band_rows(results: pd.DataFrame, frontal: str, suffix: str) -> pd.DataFrame
     return rows.drop(columns="band_tail")
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data
 def load_condlogit_bands(db_path: str, fars_years: str, span: tuple[int, int],
                          frontal: str = "core") -> pd.DataFrame:
     """Naive (unadjusted, seat-confounded) vs age-adjusted per-band female OR,
@@ -161,7 +174,7 @@ def load_condlogit_bands(db_path: str, fars_years: str, span: tuple[int, int],
     return merged
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data
 def load_band_specs(db_path: str, fars_years: str, frontal: str = "core") -> pd.DataFrame:
     """The specification-check table: the per-band female OR under the default
     pooled-nuisance model, the separate-nuisance refit, and the
@@ -190,7 +203,7 @@ def load_band_specs(db_path: str, fars_years: str, frontal: str = "core") -> pd.
     return out if out is not None else pd.DataFrame()
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data
 def load_condlogit_trend(db_path: str, fars_years: str,
                          frontal: str = "core") -> pd.Series | None:
     """Continuous model-year trend slope (log-odds per decade), the
@@ -200,7 +213,7 @@ def load_condlogit_trend(db_path: str, fars_years: str,
     return hits.iloc[0] if not hits.empty else None
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data
 def load_samesex_interaction(db_path: str, fars_years: str,
                              frontal: str = "core") -> dict:
     """Same-sex passenger-vs-driver seat baselines (male, female), raw and
@@ -227,7 +240,7 @@ def load_samesex_interaction(db_path: str, fars_years: str,
     return out
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data
 def load_severity(db_path: str) -> pd.DataFrame:
     """Latest analyze_v2 run: every {ciss,nass}_svylogit_* row, with the
     cohort_def JSON parsed into columns the section below reads. v2 rows

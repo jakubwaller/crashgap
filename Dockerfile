@@ -4,6 +4,7 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY crashgap ./crashgap
 COPY dashboard ./dashboard
+COPY deploy ./deploy
 RUN pip install --no-cache-dir .
 
 ENV CRASHGAP_DB=/app/data/crashgap.db

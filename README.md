@@ -2,7 +2,7 @@
 
 Do women die more often than men in the same car crash? CrashGap recomputes the answer from
 public NHTSA crash data and shows it at [crashgap.jakubwaller.eu](https://crashgap.jakubwaller.eu).
-When NHTSA publishes a new year, the numbers update.
+When NHTSA publishes a new year, the numbers are refreshed by hand.
 
 The idea came from reading [*Invisible Women*](https://en.wikipedia.org/wiki/Invisible_Women:_Exposing_Data_Bias_in_a_World_Designed_for_Men) by Caroline Criado Perez.
 
@@ -118,7 +118,12 @@ latest run per estimand family and window, so both windows need both `analyze` a
 ## Refresh
 
 FARS and CISS each publish one new year a year. `deploy/refresh.sh` re-pulls the newest years and
-re-runs every analysis. Point a monthly cron at it.
+re-runs every analysis. There is no schedule: run it by hand on the VPS after each yearly FARS release,
+from the repo root (the host has no Python, so it runs inside the image against `data/`):
+
+```bash
+docker compose run --rm --build --entrypoint bash crashgap deploy/refresh.sh && docker compose restart crashgap
+```
 
 ## Data
 

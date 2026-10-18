@@ -61,3 +61,9 @@ def test_model_year_bands(conn):
     by_label = bands.set_index("mod_year_band")
     assert by_label.loc["2000-2009", "f_only"] == 1
     assert by_label.loc["2017-2026", "m_only"] == 1
+
+
+def test_git_commit_prefers_env(monkeypatch):
+    from crashgap.analysis import git_commit
+    monkeypatch.setenv("CRASHGAP_GIT_COMMIT", "abc1234")
+    assert git_commit() == "abc1234"

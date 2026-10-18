@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run by hand once a year, after NHTSA publishes a new FARS year (no cron).
 # On the VPS, from the repo root (the host has no Python; this runs in the image):
-#   docker compose run --rm --build --entrypoint bash crashgap deploy/refresh.sh
+#   docker compose run --rm --build -e CRASHGAP_GIT_COMMIT=$(git rev-parse --short HEAD) --entrypoint bash crashgap deploy/refresh.sh
 # Re-pulls the two newest FARS years (the ARF gets revised until
 # final release, and a brand-new year appears each autumn), then re-analyzes
 # BOTH windows x BOTH estimand families. The dashboard reads the latest run

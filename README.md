@@ -122,7 +122,7 @@ re-runs every analysis. There is no schedule: run it by hand on the VPS after ea
 from the repo root (the host has no Python, so it runs inside the image against `data/`):
 
 ```bash
-docker compose run --rm --build --entrypoint bash crashgap deploy/refresh.sh
+docker compose run --rm --build -e CRASHGAP_GIT_COMMIT=$(git rev-parse --short HEAD) --entrypoint bash crashgap deploy/refresh.sh
 ```
 
 ## Data

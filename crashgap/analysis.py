@@ -32,6 +32,7 @@ independent: every CI is a percentile bootstrap resampling whole crashes
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 import warnings
@@ -292,6 +293,9 @@ def by_model_year_band(conn: sqlite3.Connection, years: tuple[int, int],
 
 
 def git_commit() -> str:
+    # The slim image has no git or .git; the refresh passes the commit in.
+    if os.environ.get("CRASHGAP_GIT_COMMIT"):
+        return os.environ["CRASHGAP_GIT_COMMIT"]
     try:
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                               capture_output=True, text=True, check=True,

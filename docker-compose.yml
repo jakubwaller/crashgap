@@ -4,7 +4,7 @@ services:
     container_name: crashgap
     restart: unless-stopped
     ports:
-      - "8503:8501"
+      - "127.0.0.1:8503:8501"
     volumes:
       - ./data:/app/data
     networks:
